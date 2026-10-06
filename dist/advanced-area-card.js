@@ -3206,10 +3206,16 @@ class AdvancedAreaCardEditor extends HTMLElement {
     const schema = [
       { name: "type", selector: { select: { mode: "dropdown", options: RULE_TYPES } } },
     ];
+    // Attribute picker lists the real attributes of the first selected
+    // entity; free text only until an entity is chosen.
+    const firstEntity = toEntityList(rule.entity_id)[0] || "";
+    const attributeSelector = firstEntity
+      ? { attribute: { entity_id: firstEntity } }
+      : { text: {} };
     if (rule.type === "state") {
       schema.push(
         { name: "entity_id", selector: { entity: { multiple: true, include_entities: includeEntities } } },
-        { name: "attribute", selector: { text: {} } },
+        { name: "attribute", selector: attributeSelector },
         { name: "aggregation", selector: { select: { mode: "dropdown", options: [
           { value: "any",  label: "Any entity matches" },
           { value: "all",  label: "All entities match" },
@@ -3225,12 +3231,13 @@ class AdvancedAreaCardEditor extends HTMLElement {
           { value: "truthy",   label: "Is truthy (on / open / …)" },
           { value: "falsy",    label: "Is falsy (off / closed / …)" },
         ] } } },
-        { name: "value", selector: { text: {} } },
       );
+      const valueSelector = this._getStateValueSelector(rule);
+      if (valueSelector) schema.push({ name: "value", selector: valueSelector });
     } else if (rule.type === "numeric") {
       schema.push(
         { name: "entity_id", selector: { entity: { multiple: true, include_entities: includeEntities } } },
-        { name: "attribute", selector: { text: {} } },
+        { name: "attribute", selector: attributeSelector },
         { name: "aggregation", selector: { select: { mode: "dropdown", options: [
           { value: "any",   label: "Any entity matches" },
           { value: "all",   label: "All entities match" },
@@ -3263,10 +3270,57 @@ class AdvancedAreaCardEditor extends HTMLElement {
     return schema;
   }
 
+  // Selector for the `value` of a text (state) rule. With an entity chosen
+  // the native state picker offers that entity's real states (free text is
+  // still allowed); `is one of` uses its multi-select. Truthy / falsy need
+  // no value, and regex / contains stay plain text.
+  _getStateValueSelector(rule) {
+    const operator = rule.operator || "eq";
+    if (operator === "truthy" || operator === "falsy") return null;
+    const firstEntity = toEntityList(rule.entity_id)[0] || "";
+    if (!firstEntity || !["eq", "ne", "in", "not_in"].includes(operator)) {
+      return { text: {} };
+    }
+    const state = { entity_id: firstEntity };
+    if (rule.attribute) state.attribute = rule.attribute;
+    if (operator === "in" || operator === "not_in") state.multiple = true;
+    return { state };
+  }
+
+  // Everything the rule schema depends on besides the rule type; when it
+  // changes, the open form needs a new schema (and a re-shaped value).
+  _ruleSchemaKey(rule) {
+    const first = toEntityList(rule.entity_id)[0] || "";
+    return `${rule.type}|${first}|${rule.operator || ""}|${first ? rule.attribute || "" : ""}`;
+  }
+
+  // Flat ha-form value for a rule. `in` / `not_in` values are arrays when
+  // the multi-select state picker is used, comma-separated text otherwise.
+  _ruleToFormData(rule) {
+    const operator = rule.operator || (rule.type === "numeric" ? "gt" : "eq");
+    let value = this._serializeRuleValue(rule);
+    if (rule.type === "state" && (operator === "in" || operator === "not_in")
+      && this._getStateValueSelector({ ...rule, operator })?.state) {
+      value = Array.isArray(rule.value)
+        ? rule.value
+        : this._parseRuleValue(value, operator);
+    }
+    return {
+      type: rule.type || "state",
+      entity_id: toEntityList(rule.entity_id),
+      attribute: rule.attribute || "",
+      aggregation: rule.aggregation || "any",
+      operator,
+      value,
+      after: rule.after || "",
+      before: rule.before || "",
+    };
+  }
+
   // Schema for a display_overrides entry condition (value type + entity
   // + optional attribute + operator + value). Mirrors the rule schema but
   // without aggregation / time / group options.
-  _getMapEntrySchema(type) {
+  _getMapEntrySchema(type, entityId) {
     const VALUE_TYPES = [
       { value: "numeric", label: "Number" },
       { value: "state",   label: "Text" },
@@ -3274,7 +3328,9 @@ class AdvancedAreaCardEditor extends HTMLElement {
     const schema = [
       { name: "type", selector: { select: { mode: "dropdown", options: VALUE_TYPES } } },
       { name: "entity_id", selector: { entity: {} } },
-      { name: "attribute", selector: { text: {} } },
+      { name: "attribute", selector: entityId
+        ? { attribute: { entity_id: entityId } }
+        : { text: {} } },
     ];
     if (type === "numeric") {
       schema.push(
@@ -3452,16 +3508,8 @@ class AdvancedAreaCardEditor extends HTMLElement {
     const schema = this._getRuleSchema(baseRule, includeEntities);
     // Flat form shape: the ha-form works in flat keys, so we serialize a
     // few rule fields into flat keys and round-trip them.
-    const formValue = {
-      type: baseRule.type || "state",
-      entity_id: toEntityList(baseRule.entity_id),
-      attribute: baseRule.attribute || "",
-      aggregation: baseRule.aggregation || "any",
-      operator: baseRule.operator || (baseRule.type === "numeric" ? "gt" : "eq"),
-      value: this._serializeRuleValue(baseRule),
-      after: baseRule.after || "",
-      before: baseRule.before || "",
-    };
+    const formValue = this._ruleToFormData(baseRule);
+    let schemaKey = this._ruleSchemaKey({ ...baseRule, operator: formValue.operator });
     form.hass = this._hass;
     form.data = formValue;
     form.schema = schema;
@@ -3500,6 +3548,14 @@ class AdvancedAreaCardEditor extends HTMLElement {
           for: parseNumber(baseRule.for) ?? 0,
         };
       }
+      // Entity / operator / attribute changes alter which selectors apply
+      // (attribute list, state picker, value field); refresh in place.
+      const nextKey = this._ruleSchemaKey(newRule);
+      if (nextKey !== schemaKey && newType === prevType) {
+        schemaKey = nextKey;
+        form.schema = this._getRuleSchema(newRule, includeEntities);
+        form.data = this._ruleToFormData(newRule);
+      }
       onChange(newRule);
     });
   }
@@ -3518,27 +3574,36 @@ class AdvancedAreaCardEditor extends HTMLElement {
   // Parse a text-field value back into the shape the rule expects.
   _parseRuleValue(raw, operator) {
     if (raw === null || raw === undefined) return "";
+    const isList = operator === "in" || operator === "not_in";
+    if (Array.isArray(raw)) {
+      const items = raw.map((item) => String(item).trim()).filter(Boolean);
+      return isList ? items : items.join(", ");
+    }
     const text = String(raw).trim();
     if (!text) return "";
-    if (operator === "in" || operator === "not_in") {
+    if (isList) {
       return text.split(",").map((s) => s.trim()).filter(Boolean);
     }
     return text;
   }
 
+  // Color fields use HA's `ui_color` selector through ha-form, so they get
+  // the native picker (theme colors, state color, none) and keep working
+  // when the underlying component changes.
   _setupColorPicker(id, currentValue, defaultColor, onChange) {
-    const picker = this.shadowRoot.getElementById(id);
-    if (!picker) return;
-    picker.value = currentValue || "";
-    if (defaultColor) {
-      picker.defaultColor = defaultColor;
-    }
-    picker.includeState = true;
-    picker.includeNone = true;
-    picker.addEventListener("value-changed", (e) => {
+    const form = this.shadowRoot.getElementById(id);
+    if (!form) return;
+    const options = { include_state: true, include_none: true };
+    if (defaultColor) options.default_color = defaultColor;
+    const label = form.dataset.label || "Color";
+    form.hass = this._hass;
+    form.data = { color: currentValue || "" };
+    form.schema = [{ name: "color", selector: { ui_color: options } }];
+    form.computeLabel = () => label;
+    form.addEventListener("value-changed", (e) => {
       if (this._suppressEvents) return;
       e.stopPropagation();
-      onChange(e.detail.value || "");
+      onChange(e.detail.value?.color || "");
     });
   }
 
@@ -3582,10 +3647,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
               id="chip-${chipIndex}-threshold-${thresholdIndex}-value"
               class="threshold-value-form"
             ></ha-form>
-            <ha-color-picker
-              id="chip-${chipIndex}-threshold-${thresholdIndex}-color"
-              label="Color"
-            ></ha-color-picker>
+            <ha-form id="chip-${chipIndex}-threshold-${thresholdIndex}-color" class="color-form" data-label="Color"></ha-form>
             <ha-form
               id="chip-${chipIndex}-threshold-${thresholdIndex}-icon"
               class="threshold-icon-form"
@@ -3651,10 +3713,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
           </div>
           <ha-form id="chip-${chipIndex}-form"></ha-form>
           ${supportsCustomColor ? `
-            <ha-color-picker
-              id="chip-${chipIndex}-color"
-              label="Active color"
-            ></ha-color-picker>
+            <ha-form id="chip-${chipIndex}-color" class="color-form" data-label="Active color"></ha-form>
           ` : ""}
           ${this.renderThresholdRows(chip, chipIndex)}
           <div class="action-section">
@@ -3710,15 +3769,9 @@ class AdvancedAreaCardEditor extends HTMLElement {
           <ha-form id="indicator-${indicatorIndex}-override-${oi}-match-form"></ha-form>
           <span class="section-sublabel">Display overrides (leave empty to use defaults)</span>
           <ha-form id="indicator-${indicatorIndex}-override-${oi}-display-form"></ha-form>
-          <ha-color-picker
-            id="indicator-${indicatorIndex}-override-${oi}-color"
-            label="Color override"
-          ></ha-color-picker>
+          <ha-form id="indicator-${indicatorIndex}-override-${oi}-color" class="color-form" data-label="Color override"></ha-form>
           <ha-form id="indicator-${indicatorIndex}-override-${oi}-badge-form"></ha-form>
-          <ha-color-picker
-            id="indicator-${indicatorIndex}-override-${oi}-badge-color"
-            label="Badge color override"
-          ></ha-color-picker>
+          <ha-form id="indicator-${indicatorIndex}-override-${oi}-badge-color" class="color-form" data-label="Badge color override"></ha-form>
         </div>
       </ha-expansion-panel>
     `).join("");
@@ -3787,15 +3840,9 @@ class AdvancedAreaCardEditor extends HTMLElement {
           <div class="rule-section">
             <span class="section-label">Display (defaults)</span>
             <ha-form id="indicator-${indicatorIndex}-display-form"></ha-form>
-            <ha-color-picker
-              id="indicator-${indicatorIndex}-color"
-              label="Base color"
-            ></ha-color-picker>
+            <ha-form id="indicator-${indicatorIndex}-color" class="color-form" data-label="Base color"></ha-form>
             <ha-form id="indicator-${indicatorIndex}-badge-form"></ha-form>
-            <ha-color-picker
-              id="indicator-${indicatorIndex}-badge-color"
-              label="Badge color"
-            ></ha-color-picker>
+            <ha-form id="indicator-${indicatorIndex}-badge-color" class="color-form" data-label="Badge color"></ha-form>
           </div>
 
           <div class="rule-section">
@@ -3969,12 +4016,12 @@ class AdvancedAreaCardEditor extends HTMLElement {
 
               <ha-form id="styling-title-form"></ha-form>
               ${this._config.styling.show_title ? `
-                <ha-color-picker id="styling-title-color" label="Title color"></ha-color-picker>
+                <ha-form id="styling-title-color" class="color-form" data-label="Title color"></ha-form>
               ` : ""}
 
               <ha-form id="styling-icon-form"></ha-form>
               ${this._config.styling.show_icon ? `
-                <ha-color-picker id="styling-icon-color" label="Icon color"></ha-color-picker>
+                <ha-form id="styling-icon-color" class="color-form" data-label="Icon color"></ha-form>
               ` : ""}
 
               <div class="styling-group">
@@ -4314,9 +4361,11 @@ class AdvancedAreaCardEditor extends HTMLElement {
         (display.display_overrides || []).forEach((entry, oi) => {
           // Match condition form.
           const matchType = entry.match?.type || "numeric";
-          const matchSchema = this._getMapEntrySchema(matchType);
+          const matchSchema = this._getMapEntrySchema(matchType, entry.match?.entity_id || "");
+          const matchFormId = `indicator-${i}-override-${oi}-match-form`;
+          let matchEntity = entry.match?.entity_id || "";
           const prevMatchType = matchType;
-          this._setupForm(`indicator-${i}-override-${oi}-match-form`,
+          this._setupForm(matchFormId,
             {
               type: matchType,
               entity_id: entry.match?.entity_id || "",
@@ -4340,7 +4389,14 @@ class AdvancedAreaCardEditor extends HTMLElement {
                 ? numeric
                 : data.value;
               this.emitConfig();
-              if (data.type !== prevMatchType) this.render();
+              if (data.type !== prevMatchType) {
+                this.render();
+              } else if ((data.entity_id || "") !== matchEntity) {
+                // New entity: the attribute picker must list its attributes.
+                matchEntity = data.entity_id || "";
+                const matchForm = this.shadowRoot.getElementById(matchFormId);
+                if (matchForm) matchForm.schema = this._getMapEntrySchema(m.type, matchEntity);
+              }
             },
           );
           // Display override fields.
@@ -4787,7 +4843,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         flex: 1 1 0;
         min-width: 70px;
       }
-      .threshold-row ha-color-picker {
+      .threshold-row .color-form {
         flex: 1 1 0;
         min-width: 80px;
       }
@@ -4840,7 +4896,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         font-size: 13px;
         color: var(--secondary-text-color);
       }
-      ha-color-picker {
+      .color-form {
         display: block;
       }
       .action-section {

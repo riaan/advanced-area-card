@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Editor: every color field uses Home Assistant's color selector (theme colors, state color, none) through the standard form instead of a bare `ha-color-picker` element.
+- Editor: the `attribute` field of rules and display overrides is a picker listing the real attributes of the selected entity (free text until an entity is chosen).
+- Editor: for text rules with `equals`, `not equals`, `is one of` and `is not one of`, the value is picked from the entity's actual states (custom values still allowed); `is one of` is a multi-select instead of comma-separated text. `is truthy` / `is falsy` no longer show a value field.
+
 ## [1.1.0]
 
 ### Added
