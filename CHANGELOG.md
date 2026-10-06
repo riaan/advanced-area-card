@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.0]
+
 ### Added
 
 - Chips and indicators can be activated with the keyboard (Tab to focus, Enter or Space for the tap action) and by screen readers.
