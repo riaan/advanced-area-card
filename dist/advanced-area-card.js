@@ -2,6 +2,8 @@ const VERSION = "1.0.0";
 const CARD_TYPE = "advanced-area-card";
 const DEFAULT_CARD_TYPE = `custom:${CARD_TYPE}`;
 const ACTION_HOLD_DELAY = 500;
+const REGISTRY_RETRY_MS = 10000;
+const EDITOR_PREVIEW_THROTTLE_MS = 500;
 
 // Default visual sizes – change these to tweak the card appearance globally.
 const DEFAULT_TITLE_SIZE = "1.28571429rem";
@@ -458,8 +460,9 @@ async function ensureRegistry(hass) {
     })
     .catch((error) => {
       console.error("advanced-area-card: failed to load registry", error);
-      registryCache.data = { areas: [], devices: [], entities: [] };
-      return registryCache.data;
+      // Not cached: callers see `failed` and retry later instead of being
+      // stuck with an empty registry until the page is reloaded.
+      return { areas: [], devices: [], entities: [], failed: true };
     })
     .finally(() => {
       registryCache.promise = null;
@@ -1861,6 +1864,9 @@ class AdvancedAreaCard extends HTMLElement {
     this._trueSince = new Map();       // indicator_id -> ms timestamp since which raw rule has been true
     this._forTimers = new Map();       // indicator_id -> setTimeout id waking up when `for_duration` elapses
     this._timeTickerId = null;
+    this._registryLoading = false;
+    this._registryRetryTimer = null;
+    this._stateCount = { ref: null, n: 0 }; // memoised key count of hass.states
     // Event delegation: single set of listeners on the shadow root.
     this._modelIndex = new Map();      // "kind:id" -> modelItem
     this._delegationBound = false;
@@ -1889,6 +1895,45 @@ class AdvancedAreaCard extends HTMLElement {
     }
     for (const id of this._forTimers.values()) clearTimeout(id);
     this._forTimers.clear();
+    if (this._registryRetryTimer !== null) {
+      clearTimeout(this._registryRetryTimer);
+      this._registryRetryTimer = null;
+    }
+  }
+
+  // Load the registry once; concurrent callers share the in-flight load and
+  // a failed load is retried after a delay rather than on every hass update.
+  _loadRegistry() {
+    if (this._registry || this._registryLoading || this._registryRetryTimer !== null || !this._hass) return;
+    this._registryLoading = true;
+    ensureRegistry(this._hass).then((registry) => {
+      this._registryLoading = false;
+      if (registry.failed) {
+        if (this.isConnected) {
+          this._registryRetryTimer = setTimeout(() => {
+            this._registryRetryTimer = null;
+            this._loadRegistry();
+          }, REGISTRY_RETRY_MS);
+        }
+        return;
+      }
+      this._registry = registry;
+      this._watchedAreaKey = null;
+      this._watchedAreaEntities = null;
+      this._areaEntityIdsArray = null;
+      this.render();
+    });
+  }
+
+  // Number of keys in hass.states without allocating a key array. HA swaps
+  // the states object on every change, so the count of the previous event is
+  // reused as "prev" for the next one and shared with render().
+  _getStateCount(states) {
+    if (this._stateCount.ref === states) return this._stateCount.n;
+    let n = 0;
+    for (const _id in states) n++;
+    this._stateCount = { ref: states, n };
+    return n;
   }
 
   setConfig(config) {
@@ -1906,20 +1951,14 @@ class AdvancedAreaCard extends HTMLElement {
     this._hass = hass;
     if (!this._registry) {
       // Kick off registry load (one-time). First paint happens below.
-      ensureRegistry(hass).then((registry) => {
-        this._registry = registry;
-        this._watchedAreaKey = null;
-        this._watchedAreaEntities = null;
-        this._areaEntityIdsArray = null;
-        this.render();
-      });
+      this._loadRegistry();
       this._refreshTrueSince(prevHass);
       this.render();
       return;
     }
     // Identify the subset of watched entities that actually changed. If
-    // none changed AND no time-of-day indicators are armed, the rendered
-    // output cannot have changed either — skip the entire render path.
+    // none changed, the rendered output cannot have changed either (time
+    // rules are re-evaluated by the ticker) — skip the entire render path.
     // This turns a hot "runs on every HA state event" code path into a
     // cheap Map/Set lookup when the event doesn't touch anything we
     // care about.
@@ -1930,8 +1969,8 @@ class AdvancedAreaCard extends HTMLElement {
       this.render();
       return;
     }
-    if (changed.size === 0 && this._timeIndicators.size === 0) {
-      return; // Nothing relevant changed.
+    if (changed.size === 0) {
+      return; // Nothing relevant changed; time rules are driven by the ticker.
     }
     this._refreshTrueSince(prevHass, changed);
     this.render();
@@ -1946,8 +1985,8 @@ class AdvancedAreaCard extends HTMLElement {
     // cache and force a full refresh (chip output for area-based chips
     // can change without an existing entity mutating).
     const prevStates = prevHass.states || {};
-    const prevCount = Object.keys(prevStates).length;
-    const nextCount = Object.keys(hass.states).length;
+    const prevCount = this._getStateCount(prevStates);
+    const nextCount = this._getStateCount(hass.states);
     if (prevCount !== nextCount) {
       this._watchedAreaKey = null;
       this._watchedAreaEntities = null;
@@ -1978,7 +2017,7 @@ class AdvancedAreaCard extends HTMLElement {
     ensureRegistryMaps(this._registry);
     const map = registryMaps.entityToArea;
     if (!map) return null;
-    const stateKeyCount = Object.keys(this._hass.states).length;
+    const stateKeyCount = this._getStateCount(this._hass.states);
     const areaJoin = [...this._watchedAreaIds].sort().join(",");
     const key = `${registryMaps.ref ? "r" : "n"}:${areaJoin}:${stateKeyCount}`;
     if (this._watchedAreaKey === key && this._watchedAreaEntities) {
@@ -2066,7 +2105,11 @@ class AdvancedAreaCard extends HTMLElement {
   _updateTimeTicker() {
     const needed = this._timeIndicators.size > 0;
     if (needed && this._timeTickerId === null) {
-      this._timeTickerId = setInterval(() => this.render(), 30000);
+      this._timeTickerId = setInterval(() => {
+        // Re-evaluate time rules (cached eval would otherwise go stale).
+        this._refreshTrueSince(this._hass);
+        this.render();
+      }, 30000);
     } else if (!needed && this._timeTickerId !== null) {
       clearInterval(this._timeTickerId);
       this._timeTickerId = null;
@@ -2157,6 +2200,14 @@ class AdvancedAreaCard extends HTMLElement {
   }
 
   connectedCallback() {
+    // disconnectedCallback cleared the ticker and `for_duration` timers;
+    // re-arm them, otherwise those indicators stay stuck until a watched
+    // entity changes.
+    this._updateTimeTicker();
+    if (this._config && this._hass) {
+      this._refreshTrueSince(null);
+      this._loadRegistry();
+    }
     this.render();
   }
 
@@ -2772,6 +2823,9 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._hass = null;
     this._registry = null;
     this._registryLoaded = false;
+    this._registryLoading = false;
+    this._registryRetryTimer = null;
+    this._previewTimer = null;
     this._pendingIndicatorCandidate = "";
     this._rendering = false;
     this._suppressEvents = false;
@@ -2801,9 +2855,19 @@ class AdvancedAreaCardEditor extends HTMLElement {
       this.shadowRoot.removeEventListener("change", this._boundChange);
       this._listenersBound = false;
     }
+    if (this._registryRetryTimer !== null) {
+      clearTimeout(this._registryRetryTimer);
+      this._registryRetryTimer = null;
+    }
+    if (this._previewTimer !== null) {
+      clearTimeout(this._previewTimer);
+      this._previewTimer = null;
+    }
     // Release references for GC; they'll be repopulated on reconnect.
+    // `_registry` is kept together with `_registryLoaded` (it is the shared
+    // module-level cache anyway); clearing only one left the editor with
+    // an empty area list after a reattach.
     this._hass = null;
-    this._registry = null;
     this._allEntityIdsCache = null;
     this._allEntityIdsCacheCount = -1;
   }
@@ -2841,30 +2905,50 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._hass = hass;
     if (!this._registryLoaded) {
       this.render();
-      ensureRegistry(hass).then((registry) => {
-        this._registry = registry;
-        this._registryLoaded = true;
-        this.render();
-      });
-    } else {
+      this._loadRegistry();
+    } else if (this._previewTimer === null) {
       // Post-registry: don't re-render the whole editor (would clobber
       // focus/scroll). Only refresh the indicator preview panels — those
-      // are the only parts whose content depends on live hass state.
-      this._refreshIndicatorPreviews();
+      // are the only parts whose content depends on live hass state. HA
+      // sends hass on every state event, so coalesce the refreshes.
+      this._previewTimer = setTimeout(() => {
+        this._previewTimer = null;
+        this._refreshIndicatorPreviews();
+      }, EDITOR_PREVIEW_THROTTLE_MS);
     }
+  }
+
+  _loadRegistry() {
+    if (this._registryLoaded || this._registryLoading || this._registryRetryTimer !== null || !this._hass) return;
+    this._registryLoading = true;
+    ensureRegistry(this._hass).then((registry) => {
+      this._registryLoading = false;
+      if (registry.failed) {
+        if (this.isConnected) {
+          this._registryRetryTimer = setTimeout(() => {
+            this._registryRetryTimer = null;
+            this._loadRegistry();
+          }, REGISTRY_RETRY_MS);
+        }
+        return;
+      }
+      this._registry = registry;
+      this._registryLoaded = true;
+      this.render();
+    });
   }
 
   _refreshIndicatorPreviews() {
     if (!this.shadowRoot || !this._config || !Array.isArray(this._config.activity_indicators)) return;
+    const panels = Array.from(this.shadowRoot.querySelectorAll("ha-expansion-panel"));
     this._config.activity_indicators.forEach((indicator, i) => {
       // Build the header and inline preview markup fresh and swap them
       // into their containers. We identify containers by position because
       // each indicator panel is uniquely indexed — no IDs needed.
-      const panels = this.shadowRoot.querySelectorAll("ha-expansion-panel");
       // Indicator panels sit after chip panels in render order; find by
       // querying all panels and skipping the ones whose content isn't a
       // `.panel-content > [id^="indicator-"]` match.
-      const panel = Array.from(panels).find((p) =>
+      const panel = panels.find((p) =>
         p.querySelector(`#indicator-${i}-basic-form`)
       );
       if (!panel) return;
@@ -5173,12 +5257,14 @@ if (!customElements.get("advanced-area-card-editor")) {
 }
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: CARD_TYPE,
-  name: "Advanced Area",
-  description: "Area summary card with chips, thresholds, and activity indicators.",
-  preview: true,
-  documentationURL: "https://github.com/riaan/advanced-area-card",
-});
+if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
+  window.customCards.push({
+    type: CARD_TYPE,
+    name: "Advanced Area",
+    description: "Area summary card with chips, thresholds, and activity indicators.",
+    preview: true,
+    documentationURL: "https://github.com/riaan/advanced-area-card",
+  });
+}
 
 console.info(`%c ADVANCED-AREA-CARD %c ${VERSION} `, "color: white; background: #1f6b8f; font-weight: 700;", "color: #1f6b8f; background: white; font-weight: 700;");
