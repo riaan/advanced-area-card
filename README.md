@@ -2,6 +2,8 @@
 
 A Home Assistant dashboard card that summarises one or more **areas** at a glance: area icon and name, live summary chips (lights, temperature, humidity, music, lux) and rule-based activity indicators (motion, doors, windows, heating, fans, …).
 
+![Advanced Area Card preview](docs/preview.png)
+
 - **Zero dependencies**, one JavaScript file, no build step.
 - Resolves entities through the **area, device and entity registries**: add a light to the area in Home Assistant and the chip updates by itself.
 - **Visual editor** — everything below can be configured from the dashboard "Add card" dialog, no YAML needed.
