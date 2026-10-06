@@ -2306,6 +2306,7 @@ class AdvancedAreaCard extends HTMLElement {
               data-kind="chip"
               data-id="${htmlEscape(chip.id)}"
               title="${htmlEscape(chip.label)}"
+              aria-label="${htmlEscape(`${chip.label}: ${chip.text}`)}"
             >
               <ha-icon class="chip-icon" icon="${htmlEscape(chip.icon)}"></ha-icon>
               <span class="chip-text">${htmlEscape(chip.text)}</span>
@@ -2347,6 +2348,7 @@ class AdvancedAreaCard extends HTMLElement {
           data-id="${htmlEscape(indicator.id)}"
           style="${htmlEscape(styleParts.join(";"))}"
           title="${htmlEscape(tooltip)}"
+          ${tooltip ? `aria-label="${htmlEscape(tooltip)}"` : ""}
         >
           <ha-icon class="indicator-icon" icon="${htmlEscape(indicator.icon)}"></ha-icon>
           ${badgeMarkup}
@@ -2464,6 +2466,19 @@ class AdvancedAreaCard extends HTMLElement {
     // pointerleave doesn't bubble, so use capture to see it on any descendant.
     root.addEventListener("pointerleave", cancel, true);
     root.addEventListener("pointercancel", cancel);
+    // Keyboard (Enter/Space) and assistive-technology activation produce a
+    // click with detail 0. Real pointer clicks (detail >= 1) are already
+    // handled by pointerdown/pointerup above, so ignore them to avoid
+    // firing the tap action twice.
+    root.addEventListener("click", (event) => {
+      if (event.detail !== 0) return;
+      const element = findTarget(event);
+      if (!element) return;
+      const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
+      if (!cfg) return;
+      event.stopPropagation();
+      this.handleAction(cfg.tap_action, cfg.entityIds?.[0] || cfg.entityId);
+    });
     root.addEventListener("contextmenu", (event) => {
       if (findTarget(event)) event.preventDefault();
     });
@@ -2756,6 +2771,15 @@ class AdvancedAreaCard extends HTMLElement {
         0%, 100% { transform: translateX(0); }
         25% { transform: translateX(-2px) rotate(-6deg); }
         75% { transform: translateX(2px) rotate(6deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .indicator--anim-spin .indicator-icon,
+        .indicator--anim-shake .indicator-icon,
+        .indicator--anim-pulse,
+        .indicator--anim-blink,
+        .indicator--anim-bounce {
+          animation: none;
+        }
       }
       @media (max-width: 640px) {
         .card-shell {
