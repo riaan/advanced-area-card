@@ -1,0 +1,6 @@
+{
+  "name": "Advanced Area Card",
+  "filename": "advanced-area-card.js",
+  "render_readme": true,
+  "homeassistant": "2024.6.0"
+}

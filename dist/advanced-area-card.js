@@ -1,0 +1,5184 @@
+const VERSION = "1.0.0";
+const CARD_TYPE = "advanced-area-card";
+const DEFAULT_CARD_TYPE = `custom:${CARD_TYPE}`;
+const ACTION_HOLD_DELAY = 500;
+
+// Default visual sizes – change these to tweak the card appearance globally.
+const DEFAULT_TITLE_SIZE = "1.28571429rem";
+const DEFAULT_ICON_SIZE = "30px";
+const DEFAULT_CHIPS_MARGIN = "10px";
+
+const DEFAULT_THRESHOLDS = {
+  temperature: [
+    // Lowest threshold is the "below 0" bucket; set to -50 so any real-world
+    // sub-zero reading still falls inside this range.
+    { value: -20, color: "#0CA1FF", icon: "" },
+    { value: -10, color: "#70D1FF", icon: "" },
+    { value: 0, color: "#B1E6FF", icon: "" },
+    { value: 5, color: "#DAF3FF", icon: "" },
+    { value: 10, color: "#FFE599", icon: "" },
+    { value: 15, color: "#FFC000", icon: "" },
+    { value: 20, color: "#FF9900", icon: "" },
+    { value: 30, color: "#FF0000", icon: "" },
+  ],
+  humidity: [
+    { value: 0, color: "#C2410C", icon: "" },
+    { value: 20, color: "#F59E0B", icon: "" },
+    { value: 30, color: "#A3E635", icon: "" },
+    { value: 40, color: "#22C55E", icon: "" },
+    { value: 55, color: "#14B8A6", icon: "" },
+    { value: 65, color: "#06B6D4", icon: "" },
+    { value: 75, color: "#3B82F6", icon: "" },
+    { value: 85, color: "#1D4ED8", icon: "" },
+  ],
+  lux: [
+    { value: 0, color: "#312E81", icon: "" },
+    { value: 10, color: "#4F46E5", icon: "" },
+    { value: 50, color: "#3B82F6", icon: "" },
+    { value: 150, color: "#06B6D4", icon: "" },
+    { value: 300, color: "#22C55E", icon: "" },
+    { value: 500, color: "#84CC16", icon: "" },
+    { value: 1000, color: "#EAB308", icon: "" },
+    { value: 5000, color: "#F97316", icon: "" },
+    { value: 10000, color: "#EA580C", icon: "" },
+  ],
+};
+
+const CHIP_DEFINITIONS = {
+  lights: {
+    label: "Lights",
+    icon: "mdi:lightbulb",
+    activeColor: "#f5c542",
+    inactiveColor: "rgba(255,255,255,0.38)",
+  },
+  temperature: {
+    label: "Temperature",
+    icon: "mdi:thermometer",
+  },
+  humidity: {
+    label: "Humidity",
+    icon: "mdi:water-percent",
+  },
+  music: {
+    label: "Music",
+    icon: "mdi:speaker",
+    activeColor: "#43b581",
+    inactiveColor: "rgba(255,255,255,0.38)",
+  },
+  lux: {
+    label: "Lux",
+    icon: "mdi:white-balance-sunny",
+    inactiveColor: "rgba(255,255,255,0.38)",
+  },
+};
+
+const ACTIVITY_ROLES = {
+  movement: {
+    label: "Movement",
+    icon: "mdi:motion-sensor",
+    color: "#ff9800",
+  },
+  door: {
+    label: "Door",
+    icon: "mdi:door-open",
+    color: "#f5c542",
+  },
+  window: {
+    label: "Window",
+    icon: "mdi:window-open",
+    color: "#f5c542",
+  },
+  heating: {
+    label: "Heating",
+    icon: "mdi:radiator",
+    color: "#ef5350",
+  },
+  cooling: {
+    label: "Cooling",
+    icon: "mdi:air-conditioner",
+    color: "#4fa3ff",
+  },
+  fan: {
+    label: "Fan",
+    icon: "mdi:fan",
+    color: "#43b581",
+  },
+};
+
+// SVG paths used by icon-only ha-icon-button instances in the editor.
+const MDI_PATH = {
+  arrowUp: "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z",
+  arrowDown: "M11,4H13V16L18.5,10.5L19.92,11.92L12,19.84L4.08,11.92L5.5,10.5L11,16V4Z",
+  delete: "M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z",
+};
+
+// Numeric styling fields. Stored as raw numbers (px) and converted to CSS
+// variables at render-time. An empty/undefined value means "use the
+// built-in default" for that field.
+const STYLING_NUMERIC_KEYS = [
+  "title_font_size",
+  "icon_size",
+  "chips_margin",
+  "chips_gap",
+  "chip_padding_top",
+  "chip_padding_right",
+  "chip_padding_bottom",
+  "chip_padding_left",
+  "chip_min_width",
+  "chip_radius",
+  "chip_gap",
+  "chip_icon_size",
+  "chip_text_size",
+  "indicator_gap",
+  "indicator_size",
+  "indicator_radius",
+  "indicator_icon_size",
+];
+
+// Maps a styling field to the CSS custom property the display card reads.
+const STYLING_VAR_MAP = {
+  title_font_size: "--aac-title-size",
+  icon_size: "--aac-icon-size",
+  chips_margin: "--aac-chips-margin",
+  chips_gap: "--aac-chips-gap",
+  chip_padding_top: "--aac-chip-pt",
+  chip_padding_right: "--aac-chip-pr",
+  chip_padding_bottom: "--aac-chip-pb",
+  chip_padding_left: "--aac-chip-pl",
+  chip_min_width: "--aac-chip-min-width",
+  chip_radius: "--aac-chip-radius",
+  chip_gap: "--aac-chip-gap",
+  chip_icon_size: "--aac-chip-icon-size",
+  chip_text_size: "--aac-chip-text-size",
+  indicator_gap: "--aac-indicator-gap",
+  indicator_size: "--aac-indicator-size",
+  indicator_radius: "--aac-indicator-radius",
+  indicator_icon_size: "--aac-indicator-icon-size",
+};
+
+function buildStyleVars(styling) {
+  if (!styling) return "";
+  const parts = [];
+  for (const key of STYLING_NUMERIC_KEYS) {
+    const value = styling[key];
+    if (value === null || value === undefined || value === "") continue;
+    parts.push(`${STYLING_VAR_MAP[key]}:${value}px`);
+  }
+  const titleColor = resolveColor(styling.title_color);
+  if (titleColor) parts.push(`--aac-title-color:${titleColor}`);
+  const iconColor = resolveColor(styling.icon_color);
+  if (iconColor) parts.push(`--aac-icon-color:${iconColor}`);
+  return parts.join(";");
+}
+
+// For numeric sensor states, returns the highest threshold whose value is
+// less than or equal to the current value. Used by both chips and (now)
+// activity indicators that point at a numeric sensor.
+// Thresholds are pre-sorted by normalizeConfig / normalizeIndicatorThresholds.
+function pickThresholdMatch(thresholds, value) {
+  if (!thresholds || !thresholds.length) return null;
+  if (value === null || value === undefined || Number.isNaN(value)) return null;
+  let match = null;
+  for (let i = 0; i < thresholds.length; i++) {
+    if (value >= thresholds[i].value) {
+      match = thresholds[i];
+    } else {
+      break;
+    }
+  }
+  return match;
+}
+
+const HA_STATE_COLORS = new Set([
+  "primary", "accent", "disabled",
+  "red", "pink", "purple", "deep-purple", "indigo",
+  "blue", "light-blue", "cyan", "teal",
+  "green", "light-green", "lime",
+  "yellow", "amber", "orange", "deep-orange",
+  "brown", "light-grey", "grey", "dark-grey", "blue-grey",
+  "black", "white",
+]);
+
+// Convert a stored color string into something the browser can render.
+// HA's color picker returns named state colors like "primary" or "red";
+// these need to be mapped to the matching CSS custom property
+// (--primary-color, --red-color, ...). Hex/rgb/var() values are passed
+// through unchanged.
+function resolveColor(color) {
+  if (!color || typeof color !== "string") return "";
+  const trimmed = color.trim();
+  if (!trimmed) return "";
+  if (/^(#|rgb|hsl|var\()/i.test(trimmed)) {
+    return trimmed;
+  }
+  if (HA_STATE_COLORS.has(trimmed)) {
+    return `var(--${trimmed}-color)`;
+  }
+  return trimmed;
+}
+
+const registryCache = {
+  hass: null,
+  promise: null,
+  data: null,
+};
+
+// Fast lookup tables built once when the registry loads, instead of
+// scanning arrays with .find() on every render.  Rebuilt lazily only
+// when the underlying registry data reference changes.
+const registryMaps = {
+  ref: null,               // identity of the registryCache.data we indexed
+  entityById: null,        // Map<entity_id, entityRegistryEntry>
+  deviceById: null,        // Map<device_id, deviceRegistryEntry>
+  areaById: null,          // Map<area_id, areaEntry>
+  entityToArea: null,      // Map<entity_id, area_id>
+};
+
+function ensureRegistryMaps(registry) {
+  if (!registry || registryMaps.ref === registry) return;
+  registryMaps.ref = registry;
+  registryMaps.entityById = new Map();
+  registryMaps.deviceById = new Map();
+  registryMaps.areaById = new Map();
+  registryMaps.entityToArea = new Map();
+  for (const area of registry.areas) {
+    registryMaps.areaById.set(area.area_id, area);
+  }
+  for (const device of registry.devices) {
+    registryMaps.deviceById.set(device.id, device);
+  }
+  for (const entry of registry.entities) {
+    registryMaps.entityById.set(entry.entity_id, entry);
+    // Pre-resolve entity → area so the hot path is a single Map.get.
+    if (entry.area_id) {
+      registryMaps.entityToArea.set(entry.entity_id, entry.area_id);
+    } else if (entry.device_id) {
+      const device = registryMaps.deviceById.get(entry.device_id);
+      if (device?.area_id) {
+        registryMaps.entityToArea.set(entry.entity_id, device.area_id);
+      }
+    }
+  }
+}
+
+// Hoisted so `pickDisplayOverride` doesn't recreate the literal array on
+// every call (hot path — runs once per indicator per render).
+const NUMERIC_OPS = new Set(["gt", "gte", "lt", "lte"]);
+
+const activeActionMap = new WeakMap();
+
+function fireEvent(node, type, detail = {}, options = {}) {
+  const event = new CustomEvent(type, {
+    bubbles: options.bubbles ?? true,
+    cancelable: Boolean(options.cancelable),
+    composed: options.composed ?? true,
+    detail,
+  });
+  node.dispatchEvent(event);
+  return event;
+}
+
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+function makeId(prefix) {
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// structuredClone is available in all browsers that support custom elements v1.
+// Falls back to JSON round-trip only if needed (older Android WebView builds).
+const clone = typeof structuredClone === "function"
+  ? structuredClone
+  : (value) => JSON.parse(JSON.stringify(value));
+
+function htmlEscape(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Lazily-instantiated collator — `String.prototype.localeCompare` builds
+// a fresh Intl.Collator on every call, which dominates sort cost for
+// large entity lists.
+let _labelCollator = null;
+function _getLabelCollator() {
+  if (!_labelCollator) {
+    try {
+      _labelCollator = new Intl.Collator(undefined, { sensitivity: "base" });
+    } catch (_) {
+      _labelCollator = { compare: (a, b) => (a < b ? -1 : a > b ? 1 : 0) };
+    }
+  }
+  return _labelCollator;
+}
+
+function sortByLabel(values, getLabel) {
+  const collator = _getLabelCollator();
+  // Materialise labels once instead of calling getLabel twice per compare.
+  const decorated = [];
+  if (Array.isArray(values)) {
+    for (let i = 0; i < values.length; i++) {
+      decorated.push({ v: values[i], k: getLabel(values[i]) || "" });
+    }
+  } else {
+    for (const v of values) decorated.push({ v, k: getLabel(v) || "" });
+  }
+  decorated.sort((a, b) => collator.compare(a.k, b.k));
+  const out = new Array(decorated.length);
+  for (let i = 0; i < decorated.length; i++) out[i] = decorated[i].v;
+  return out;
+}
+
+function parseNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function createDefaultChip(type) {
+  return {
+    id: makeId(type),
+    type,
+    icon: CHIP_DEFINITIONS[type]?.icon || "mdi:circle",
+    hidden_when_zero: false,
+    use_custom_entities: true,
+    entity_ids: [],
+    thresholds: (DEFAULT_THRESHOLDS[type] || []).map((t) => ({ ...t })),
+    tap_action: { action: "more-info" },
+    hold_action: { action: "none" },
+  };
+}
+
+function normalizeStyling(input) {
+  const source = (input && typeof input === "object") ? input : {};
+  const styling = {
+    show_title: source.show_title !== false,
+    show_icon: source.show_icon !== false,
+    title_color: typeof source.title_color === "string" ? source.title_color : "",
+    icon_color: typeof source.icon_color === "string" ? source.icon_color : "",
+  };
+  for (const key of STYLING_NUMERIC_KEYS) {
+    styling[key] = parseNumber(source[key]);
+  }
+  return styling;
+}
+
+function normalizeIndicatorThresholds(thresholds) {
+  if (!Array.isArray(thresholds)) return [];
+  return thresholds.map((threshold) => ({
+    value: parseNumber(threshold.value) ?? 0,
+    color: threshold.color || "",
+    icon_size: parseNumber(threshold.icon_size),
+  })).sort((a, b) => a.value - b.value);
+}
+
+function normalizeConfig(inputConfig) {
+  const config = clone(inputConfig || {});
+  if (config.type !== DEFAULT_CARD_TYPE) {
+    config.type = DEFAULT_CARD_TYPE;
+  }
+  // Multi-area support: `areas` is the source of truth. Configs that
+  // pre-date multi-area used a single string `area` field — migrate it.
+  if (Array.isArray(config.areas)) {
+    config.areas = unique(config.areas.filter((id) => typeof id === "string" && id));
+  } else if (typeof config.area === "string" && config.area) {
+    config.areas = [config.area];
+  } else {
+    config.areas = [];
+  }
+  // Keep `area` mirrored to the first selected area so any external
+  // code that still reads it (and our own internal helpers) keeps working.
+  config.area = config.areas[0] || "";
+  config.title = config.title || "";
+  config.icon = config.icon || "";
+  config.icon_style = ["plain", "boxed"].includes(config.icon_style) ? config.icon_style : "plain";
+  config.tap_action = config.tap_action && typeof config.tap_action === "object"
+    ? config.tap_action
+    : { action: "none" };
+  config.hold_action = config.hold_action && typeof config.hold_action === "object"
+    ? config.hold_action
+    : { action: "none" };
+  config.chips = Array.isArray(config.chips) ? config.chips.map((chip) => ({
+    ...createDefaultChip(chip.type || "lights"),
+    ...chip,
+    id: chip.id || makeId(chip.type || "chip"),
+    use_light_color: chip.use_light_color === true,
+    entity_ids: unique(chip.entity_ids || []),
+    thresholds: (Array.isArray(chip.thresholds) && chip.thresholds.length
+      ? chip.thresholds.map((threshold) => ({
+          value: parseNumber(threshold.value) ?? 0,
+          color: threshold.color || "#43b581",
+          icon: typeof threshold.icon === "string" ? threshold.icon : "",
+        }))
+      : (DEFAULT_THRESHOLDS[chip.type] || []).map((t) => ({ ...t }))
+    ).sort((a, b) => a.value - b.value),
+    tap_action: chip.tap_action || { action: "more-info" },
+    hold_action: chip.hold_action || { action: "none" },
+  })) : [];
+  config.activity_indicators = Array.isArray(config.activity_indicators)
+    ? config.activity_indicators.map((indicator) => normalizeIndicator(indicator))
+    : [];
+  config.styling = normalizeStyling(config.styling);
+  return config;
+}
+
+async function ensureRegistry(hass) {
+  if (!hass || !hass.callWS) {
+    return { areas: [], devices: [], entities: [] };
+  }
+  if (registryCache.data) {
+    return registryCache.data;
+  }
+  if (registryCache.promise) {
+    return registryCache.promise;
+  }
+  registryCache.promise = Promise.all([
+    hass.callWS({ type: "config/area_registry/list" }),
+    hass.callWS({ type: "config/device_registry/list" }),
+    hass.callWS({ type: "config/entity_registry/list" }),
+  ])
+    .then(([areas, devices, entities]) => {
+      const data = { areas, devices, entities };
+      registryCache.data = data;
+      return data;
+    })
+    .catch((error) => {
+      console.error("advanced-area-card: failed to load registry", error);
+      registryCache.data = { areas: [], devices: [], entities: [] };
+      return registryCache.data;
+    })
+    .finally(() => {
+      registryCache.promise = null;
+    });
+  return registryCache.promise;
+}
+
+function getAreaName(area) {
+  return area?.name || area?.normalized_name || area?.area_id || "Area";
+}
+
+function getAreaMeta(registry, areaId) {
+  ensureRegistryMaps(registry);
+  return registryMaps.areaById?.get(areaId) || null;
+}
+
+function getEntityRegistryEntry(registry, entityId) {
+  ensureRegistryMaps(registry);
+  return registryMaps.entityById?.get(entityId) || null;
+}
+
+function getEntityAreaId(registry, entityId) {
+  ensureRegistryMaps(registry);
+  return registryMaps.entityToArea?.get(entityId) || null;
+}
+
+function getAreaEntityIds(hass, registry, areaId) {
+  if (!hass || !registry || !areaId) return [];
+  return getAreasEntityIds(hass, registry, [areaId]);
+}
+
+// Aggregate entity IDs across multiple areas. Uses the pre-built
+// entityToArea map so it's a single pass over hass.states with O(1)
+// lookups instead of O(entities × registry) scans.
+function getAreasEntityIds(hass, registry, areaIds) {
+  if (!Array.isArray(areaIds) || areaIds.length === 0) return [];
+  ensureRegistryMaps(registry);
+  const map = registryMaps.entityToArea;
+  if (!map) return [];
+  const wanted = areaIds.length === 1 ? null : new Set(areaIds);
+  const singleId = areaIds.length === 1 ? areaIds[0] : null;
+  const result = [];
+  for (const entityId in hass.states) {
+    const areaId = map.get(entityId);
+    if (!areaId) continue;
+    if (singleId ? areaId === singleId : wanted.has(areaId)) {
+      result.push(entityId);
+    }
+  }
+  return result;
+}
+
+function getConfigAreaIds(config) {
+  if (!config) return [];
+  if (Array.isArray(config.areas) && config.areas.length) return config.areas;
+  if (typeof config.area === "string" && config.area) return [config.area];
+  return [];
+}
+
+function getDomain(entityId) {
+  return String(entityId || "").split(".")[0];
+}
+
+function getFriendlyName(stateObj, entityId) {
+  return stateObj?.attributes?.friendly_name || entityId;
+}
+
+function getEntityLabel(hass, entityId) {
+  return getFriendlyName(hass.states[entityId], entityId);
+}
+
+function isNumberState(stateObj) {
+  return parseNumber(stateObj?.state) !== null;
+}
+
+function getUnit(stateObj) {
+  return stateObj?.attributes?.unit_of_measurement || "";
+}
+
+function isTemperatureEntity(stateObj, entityId) {
+  const domain = getDomain(entityId);
+  const deviceClass = stateObj?.attributes?.device_class;
+  const unit = getUnit(stateObj);
+  if (domain === "climate" && parseNumber(stateObj?.attributes?.current_temperature) !== null) {
+    return true;
+  }
+  return deviceClass === "temperature" || ["°C", "°F", "K"].includes(unit);
+}
+
+function isHumidityEntity(stateObj, entityId) {
+  const domain = getDomain(entityId);
+  const deviceClass = stateObj?.attributes?.device_class;
+  const unit = getUnit(stateObj);
+  if (domain === "climate" && parseNumber(stateObj?.attributes?.current_humidity) !== null) {
+    return true;
+  }
+  return deviceClass === "humidity" || unit === "%";
+}
+
+function isLuxEntity(stateObj) {
+  const deviceClass = stateObj?.attributes?.device_class;
+  const unit = getUnit(stateObj).toLowerCase();
+  return deviceClass === "illuminance" || unit === "lx" || unit === "lux";
+}
+
+function getTemperatureValue(hass, stateObj, entityId) {
+  const domain = getDomain(entityId);
+  if (domain === "climate") {
+    const numeric = parseNumber(stateObj?.attributes?.current_temperature);
+    if (numeric === null) {
+      return null;
+    }
+    return {
+      value: numeric,
+      unit: hass?.config?.unit_system?.temperature || "°C",
+    };
+  }
+  const numeric = parseNumber(stateObj?.state);
+  if (numeric === null) {
+    return null;
+  }
+  return {
+    value: numeric,
+    unit: getUnit(stateObj) || hass?.config?.unit_system?.temperature || "°C",
+  };
+}
+
+function convertTemperature(value, fromUnit, toUnit) {
+  if (!Number.isFinite(value) || !fromUnit || !toUnit || fromUnit === toUnit) {
+    return value;
+  }
+  if (fromUnit === "°F" && toUnit === "°C") {
+    return (value - 32) * (5 / 9);
+  }
+  if (fromUnit === "°C" && toUnit === "°F") {
+    return value * (9 / 5) + 32;
+  }
+  if (fromUnit === "K" && toUnit === "°C") {
+    return value - 273.15;
+  }
+  if (fromUnit === "°C" && toUnit === "K") {
+    return value + 273.15;
+  }
+  if (fromUnit === "K" && toUnit === "°F") {
+    return (value - 273.15) * (9 / 5) + 32;
+  }
+  if (fromUnit === "°F" && toUnit === "K") {
+    return (value - 32) * (5 / 9) + 273.15;
+  }
+  return value;
+}
+
+function getHumidityValue(stateObj, entityId) {
+  const domain = getDomain(entityId);
+  if (domain === "climate") {
+    return parseNumber(stateObj?.attributes?.current_humidity);
+  }
+  return parseNumber(stateObj?.state);
+}
+
+function getLuxValue(stateObj) {
+  return parseNumber(stateObj?.state);
+}
+
+function average(values) {
+  if (!values.length) {
+    return null;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function roundValue(value, digits = 1) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function resolveThresholdColor(value, thresholds, fallback) {
+  const match = resolveThresholdEntry(value, thresholds);
+  return match?.color || fallback;
+}
+
+// Returns the winning threshold entry (with original `icon` field preserved)
+// so the caller can use its icon override. Thresholds are pre-sorted by
+// normalizeConfig, so this is a simple linear scan with zero allocations.
+function resolveThresholdEntry(value, thresholds) {
+  if (!thresholds || !thresholds.length || value === null || value === undefined) {
+    return null;
+  }
+  let winner = thresholds[0];
+  for (let i = 1; i < thresholds.length; i++) {
+    if (value >= thresholds[i].value) {
+      winner = thresholds[i];
+    } else {
+      break; // pre-sorted: no later entry can match
+    }
+  }
+  return winner;
+}
+
+function formatNumber(value, digits = 0) {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+// `cachedAreaEntityIds` is an optional pre-computed list of entities for the
+// configured areas. When provided, skips the (relatively expensive) call to
+// getAreasEntityIds. buildCardModel passes it so the list is computed once
+// for all chips instead of once per chip.
+function pickChipEntityIds(hass, registry, areaIds, chip, cachedAreaEntityIds) {
+  const areaEntityIds = cachedAreaEntityIds || getAreasEntityIds(hass, registry, areaIds);
+  const candidates = chip.use_custom_entities ? (chip.entity_ids || []) : areaEntityIds;
+  return unique(candidates).filter((entityId) => {
+    const stateObj = hass.states[entityId];
+    if (!stateObj) {
+      return false;
+    }
+    switch (chip.type) {
+      case "lights":
+        return getDomain(entityId) === "light";
+      case "music":
+        return getDomain(entityId) === "media_player";
+      case "temperature":
+        return isTemperatureEntity(stateObj, entityId);
+      case "humidity":
+        return isHumidityEntity(stateObj, entityId);
+      case "lux":
+        return isLuxEntity(stateObj, entityId);
+      default:
+        return false;
+    }
+  });
+}
+
+// Averages the rgb_color attribute of all "on" lights into a single
+// representative color string. Returns null when no lights report a
+// color — the caller should fall back to the default/custom color.
+// This is very cheap: just a few additions across a handful of entities.
+function averageLightColor(hass, entityIds) {
+  let r = 0, g = 0, b = 0, count = 0;
+  for (let i = 0; i < entityIds.length; i++) {
+    const stateObj = hass.states[entityIds[i]];
+    if (!stateObj || stateObj.state !== "on") continue;
+    const rgb = stateObj.attributes?.rgb_color;
+    if (Array.isArray(rgb) && rgb.length >= 3) {
+      r += rgb[0];
+      g += rgb[1];
+      b += rgb[2];
+      count++;
+    }
+  }
+  if (count === 0) return null;
+  return `rgb(${Math.round(r / count)},${Math.round(g / count)},${Math.round(b / count)})`;
+}
+
+function buildChipModel(hass, registry, config, chip, cachedAreaEntityIds) {
+  const definition = CHIP_DEFINITIONS[chip.type] || {};
+  const entityIds = pickChipEntityIds(hass, registry, getConfigAreaIds(config), chip, cachedAreaEntityIds);
+  const baseIcon = chip.icon || definition.icon || "mdi:circle";
+  const base = {
+    id: chip.id,
+    type: chip.type,
+    label: definition.label || chip.type,
+    icon: baseIcon,
+    text: "--",
+    visible: true,
+    color: chip.active_color || definition.activeColor || "#ffffff",
+    mutedColor: chip.inactive_color || definition.inactiveColor || "rgba(255,255,255,0.38)",
+    entityIds,
+    tap_action: chip.tap_action,
+    hold_action: chip.hold_action,
+    active: true,
+  };
+
+  if (chip.type === "lights") {
+    const onCount = entityIds.filter((entityId) => hass.states[entityId]?.state === "on").length;
+    const active = onCount > 0;
+    let color;
+    if (!active) {
+      color = base.mutedColor;
+    } else if (chip.use_light_color) {
+      // Average the actual light colors; fall back to custom or default.
+      color = averageLightColor(hass, entityIds) || chip.active_color || definition.activeColor || "#f5c542";
+    } else {
+      color = chip.active_color || definition.activeColor || "#f5c542";
+    }
+    return {
+      ...base,
+      text: formatNumber(onCount, 0),
+      visible: !(chip.hidden_when_zero && onCount === 0),
+      color,
+      active,
+    };
+  }
+
+  if (chip.type === "music") {
+    const activeCount = entityIds.filter((entityId) => {
+      const state = hass.states[entityId]?.state;
+      return ["playing", "buffering", "on"].includes(state);
+    }).length;
+    const active = activeCount > 0;
+    return {
+      ...base,
+      text: formatNumber(activeCount, 0),
+      visible: !(chip.hidden_when_zero && activeCount === 0),
+      color: active ? (chip.active_color || definition.activeColor || "#43b581") : base.mutedColor,
+      active,
+    };
+  }
+
+  if (chip.type === "temperature") {
+    const readings = entityIds
+      .map((entityId) => getTemperatureValue(hass, hass.states[entityId], entityId))
+      .filter(Boolean);
+    const targetUnit = readings[0]?.unit || hass?.config?.unit_system?.temperature || "°C";
+    const values = readings.map((item) => convertTemperature(item.value, item.unit, targetUnit));
+    const averageValue = roundValue(average(values), 1);
+    const match = resolveThresholdEntry(averageValue, chip.thresholds);
+    return {
+      ...base,
+      icon: match?.icon || baseIcon,
+      text: averageValue === null ? "--" : `${formatNumber(averageValue, 1)}${targetUnit}`,
+      color: match?.color || "#43b581",
+      active: averageValue !== null,
+    };
+  }
+
+  if (chip.type === "humidity") {
+    const values = entityIds
+      .map((entityId) => getHumidityValue(hass.states[entityId], entityId))
+      .filter((value) => value !== null);
+    const averageValue = roundValue(average(values), 0);
+    const match = resolveThresholdEntry(averageValue, chip.thresholds);
+    return {
+      ...base,
+      icon: match?.icon || baseIcon,
+      text: averageValue === null ? "--" : `${formatNumber(averageValue, 0)}%`,
+      color: match?.color || "#43b581",
+      active: averageValue !== null,
+    };
+  }
+
+  if (chip.type === "lux") {
+    const values = entityIds
+      .map((entityId) => getLuxValue(hass.states[entityId]))
+      .filter((value) => value !== null);
+    const averageValue = roundValue(average(values), 0);
+    const active = (averageValue || 0) > 0;
+    const match = active ? resolveThresholdEntry(averageValue, chip.thresholds) : null;
+    return {
+      ...base,
+      icon: match?.icon || baseIcon,
+      text: averageValue === null ? "--" : `${formatNumber(averageValue, 0)} lx`,
+      visible: !(chip.hidden_when_zero && (averageValue || 0) === 0),
+      color: active ? (match?.color || "#43b581") : base.mutedColor,
+      active,
+    };
+  }
+
+  return base;
+}
+
+function entityLooksLikeDoor(entityId, stateObj) {
+  const deviceClass = stateObj?.attributes?.device_class;
+  if (["door", "garage_door", "opening"].includes(deviceClass)) {
+    return true;
+  }
+  return /(door|garage)/i.test(entityId || "");
+}
+
+function entityLooksLikeWindow(entityId, stateObj) {
+  const deviceClass = stateObj?.attributes?.device_class;
+  if (deviceClass === "window") {
+    return true;
+  }
+  return /window/i.test(entityId || "");
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rule-based activity indicator engine
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Indicators are driven by a small tree of rule nodes:
+//   { type: "state",   entity_id, attribute?, aggregation, operator, value }
+//   { type: "numeric", entity_id, attribute?, aggregation, operator, value }
+//   { type: "time",    after?: "HH:MM", before?: "HH:MM" }
+//   { type: "and",     rules: [...] }
+//   { type: "or",      rules: [...] }
+//   { type: "not",     rule:  {...} }
+//
+// An indicator shows when its `when` rule is true AND every `and_if` rule
+// is true. The optional `for_duration` on the indicator (seconds) delays
+// activation until the combined result has held long enough.
+//
+
+// Truthy values used when a rule's value is boolean-ish (e.g. "on"/"off").
+const RULE_TRUTHY = new Set(["on", "open", "opening", "home", "detected", "true", "active", "playing"]);
+
+function toEntityList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter((id) => typeof id === "string" && id);
+  return typeof value === "string" && value ? [value] : [];
+}
+
+function parseHHMM(value) {
+  if (typeof value !== "string") return null;
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+// Reads an attribute from a state object via a dotted path, e.g.
+// "hvac_action" or "light.brightness". Returns undefined if anything
+// along the path is missing.
+function getAttrPath(stateObj, path) {
+  if (!stateObj || !path) return undefined;
+  const parts = String(path).split(".");
+  let cursor = stateObj.attributes;
+  for (const part of parts) {
+    if (cursor == null) return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function coerceForCompare(value) {
+  // Match HA-style booleans so "on" == true works intuitively.
+  if (value === true) return "on";
+  if (value === false) return "off";
+  return value;
+}
+
+function applyOperator(operator, left, right) {
+  const op = operator || "eq";
+  left = coerceForCompare(left);
+  switch (op) {
+    case "eq":
+      // Loose comparison so "5" == 5 and "on" == "on" both work.
+      // eslint-disable-next-line eqeqeq
+      return left == right;
+    case "ne":
+      // eslint-disable-next-line eqeqeq
+      return left != right;
+    case "gt": return Number(left) > Number(right);
+    case "gte": return Number(left) >= Number(right);
+    case "lt": return Number(left) < Number(right);
+    case "lte": return Number(left) <= Number(right);
+    case "in": {
+      const list = Array.isArray(right) ? right : String(right || "").split(",").map((x) => x.trim());
+      return list.includes(String(left));
+    }
+    case "not_in": {
+      const list = Array.isArray(right) ? right : String(right || "").split(",").map((x) => x.trim());
+      return !list.includes(String(left));
+    }
+    case "contains":
+      return String(left).toLowerCase().includes(String(right).toLowerCase());
+    case "matches":
+      try { return new RegExp(String(right)).test(String(left)); }
+      catch (_e) { return false; }
+    case "truthy":
+      if (left === null || left === undefined) return false;
+      if (typeof left === "number") return left !== 0;
+      if (typeof left === "boolean") return left;
+      return RULE_TRUTHY.has(String(left).toLowerCase());
+    case "falsy":
+      if (left === null || left === undefined) return true;
+      if (typeof left === "number") return left === 0;
+      if (typeof left === "boolean") return !left;
+      return !RULE_TRUTHY.has(String(left).toLowerCase());
+    default:
+      return false;
+  }
+}
+
+function reduceNumeric(values, aggregation) {
+  if (!values.length) return null;
+  switch (aggregation) {
+    case "sum": return values.reduce((a, b) => a + b, 0);
+    case "avg": return values.reduce((a, b) => a + b, 0) / values.length;
+    case "min": return Math.min(...values);
+    case "max": return Math.max(...values);
+    case "count": return values.length;
+    case "first": return values[0];
+    default: return null;
+  }
+}
+
+function evaluateStateRule(rule, hass) {
+  const entityIds = toEntityList(rule.entity_id);
+  if (!entityIds.length) return false;
+  const operator = rule.operator || "eq";
+  const value = rule.value;
+  const results = [];
+  for (const id of entityIds) {
+    const stateObj = hass?.states?.[id];
+    if (!stateObj) { results.push(false); continue; }
+    const raw = rule.attribute
+      ? getAttrPath(stateObj, rule.attribute)
+      : stateObj.state;
+    results.push(applyOperator(operator, raw, value));
+  }
+  const agg = rule.aggregation || "any";
+  if (agg === "all") return results.every(Boolean);
+  if (agg === "none") return !results.some(Boolean);
+  return results.some(Boolean);
+}
+
+function evaluateNumericRule(rule, hass) {
+  const entityIds = toEntityList(rule.entity_id);
+  if (!entityIds.length) return false;
+  const raws = [];
+  for (const id of entityIds) {
+    const stateObj = hass?.states?.[id];
+    if (!stateObj) continue;
+    const raw = rule.attribute
+      ? getAttrPath(stateObj, rule.attribute)
+      : stateObj.state;
+    const numeric = parseNumber(raw);
+    if (numeric !== null) raws.push(numeric);
+  }
+  const agg = rule.aggregation || "any";
+  const operator = rule.operator || "gt";
+  const threshold = parseNumber(rule.value) ?? rule.value;
+  // Per-entity comparisons (any / all / none).
+  if (agg === "any" || agg === "all" || agg === "none") {
+    if (!raws.length) return agg === "none";
+    const matches = raws.map((v) => applyOperator(operator, v, threshold));
+    if (agg === "all") return matches.every(Boolean);
+    if (agg === "none") return !matches.some(Boolean);
+    return matches.some(Boolean);
+  }
+  // Aggregate-first comparisons (sum / avg / min / max / count).
+  const aggregated = reduceNumeric(raws, agg);
+  if (aggregated === null) return false;
+  return applyOperator(operator, aggregated, threshold);
+}
+
+function evaluateTimeRule(rule, ctx) {
+  const now = ctx?.now instanceof Date ? ctx.now : new Date();
+  const mins = now.getHours() * 60 + now.getMinutes();
+  const after = parseHHMM(rule.after);
+  const before = parseHHMM(rule.before);
+  if (after === null && before === null) return true;
+  if (after !== null && before !== null) {
+    // Overnight windows wrap (e.g. after 23:00 AND before 07:00).
+    if (after <= before) return mins >= after && mins < before;
+    return mins >= after || mins < before;
+  }
+  if (after !== null) return mins >= after;
+  return mins < before;
+}
+
+function evaluateRule(rule, hass, ctx) {
+  if (!rule || typeof rule !== "object") return false;
+  switch (rule.type) {
+    case "state": return evaluateStateRule(rule, hass);
+    case "numeric": return evaluateNumericRule(rule, hass);
+    case "time": return evaluateTimeRule(rule, ctx);
+    case "and": return Array.isArray(rule.rules) && rule.rules.every((r) => evaluateRule(r, hass, ctx));
+    case "or": return Array.isArray(rule.rules) && rule.rules.some((r) => evaluateRule(r, hass, ctx));
+    case "not": return !evaluateRule(rule.rule, hass, ctx);
+    default: return false;
+  }
+}
+
+// Raw truth of an indicator *before* `for_duration` delay is applied.
+function evaluateIndicatorRaw(indicator, hass, ctx) {
+  if (!indicator || !indicator.when) return false;
+  if (!evaluateRule(indicator.when, hass, ctx)) return false;
+  const conditions = Array.isArray(indicator.and_if) ? indicator.and_if : [];
+  for (const condition of conditions) {
+    if (!evaluateRule(condition, hass, ctx)) return false;
+  }
+  return true;
+}
+
+// Walks an indicator's `when` rule collecting the { id, attr } pairs used
+// to resolve the representative value. Extracted so the card can cache
+// the result on config change instead of re-walking on every render.
+function collectIndicatorRepCandidates(indicator) {
+  const bucket = [];
+  const walk = (rule) => {
+    if (!rule) return;
+    if (rule.type === "numeric" || rule.type === "state") {
+      for (const id of toEntityList(rule.entity_id)) bucket.push({ id, attr: rule.attribute });
+    } else if (rule.type === "and" || rule.type === "or") {
+      (rule.rules || []).forEach(walk);
+    } else if (rule.type === "not") {
+      walk(rule.rule);
+    }
+  };
+  walk(indicator?.when);
+  return bucket;
+}
+
+// Resolves the "representative" numeric value of an indicator for use in
+// display_overrides matching, tooltips and badges. Uses the first
+// numeric-typed entity from the `when` rule. Accepts an optional
+// precomputed candidate list to skip the rule-tree walk on the hot path.
+function getIndicatorRepresentativeValue(indicator, hass, candidates) {
+  const bucket = candidates || collectIndicatorRepCandidates(indicator);
+  for (const { id, attr } of bucket) {
+    const stateObj = hass?.states?.[id];
+    if (!stateObj) continue;
+    const raw = attr ? getAttrPath(stateObj, attr) : stateObj.state;
+    const numeric = parseNumber(raw);
+    if (numeric !== null) return { value: numeric, raw, stateObj, entityId: id };
+  }
+  // No numeric — fall back to first entity's raw state.
+  if (bucket.length) {
+    const first = bucket[0];
+    const stateObj = hass?.states?.[first.id];
+    if (stateObj) {
+      const raw = first.attr ? getAttrPath(stateObj, first.attr) : stateObj.state;
+      return { value: null, raw, stateObj, entityId: first.id };
+    }
+  }
+  return { value: null, raw: null, stateObj: null, entityId: null };
+}
+
+// Finds the first matching display_overrides entry. Each entry carries a
+// match condition and optional display property overrides. When an entry
+// specifies its own entity_id (and optional attribute), the test reads
+// that entity's value instead of the representative. First match wins.
+function pickDisplayOverride(overrides, representative, hass) {
+  if (!Array.isArray(overrides) || !overrides.length) return null;
+  const { value: repNumeric, raw: repRaw } = representative || {};
+  for (const entry of overrides) {
+    if (!entry || !entry.match) continue;
+    const operator = entry.match.operator || "gt";
+    const threshold = entry.match.value;
+    let numeric = repNumeric;
+    let raw = repRaw;
+    if (entry.match.entity_id && hass?.states) {
+      const stateObj = hass.states[entry.match.entity_id];
+      if (!stateObj) continue;
+      raw = entry.match.attribute
+        ? getAttrPath(stateObj, entry.match.attribute)
+        : stateObj.state;
+      numeric = parseNumber(raw);
+    }
+    const isNumericOp = NUMERIC_OPS.has(operator);
+    const left = isNumericOp ? numeric : raw;
+    if (left === null || left === undefined) continue;
+    if (applyOperator(operator, left, threshold)) return entry;
+  }
+  return null;
+}
+
+// Walks every rule tree on an indicator collecting referenced entity ids.
+function collectRuleEntityIds(rule, out) {
+  if (!rule || typeof rule !== "object") return;
+  if (rule.type === "state" || rule.type === "numeric") {
+    for (const id of toEntityList(rule.entity_id)) out.add(id);
+    return;
+  }
+  if (rule.type === "and" || rule.type === "or") {
+    (rule.rules || []).forEach((r) => collectRuleEntityIds(r, out));
+    return;
+  }
+  if (rule.type === "not") {
+    collectRuleEntityIds(rule.rule, out);
+  }
+}
+
+function collectIndicatorEntityIds(indicator) {
+  const out = new Set();
+  if (indicator) {
+    collectRuleEntityIds(indicator.when, out);
+    (indicator.and_if || []).forEach((r) => collectRuleEntityIds(r, out));
+  }
+  return out;
+}
+
+function ruleHasTime(rule) {
+  if (!rule || typeof rule !== "object") return false;
+  if (rule.type === "time") return true;
+  if (rule.type === "and" || rule.type === "or") return (rule.rules || []).some(ruleHasTime);
+  if (rule.type === "not") return ruleHasTime(rule.rule);
+  return false;
+}
+
+function indicatorHasTime(indicator) {
+  if (!indicator) return false;
+  if (ruleHasTime(indicator.when)) return true;
+  return (indicator.and_if || []).some(ruleHasTime);
+}
+
+// Smart defaults: given a freshly-picked entity, return a ready-to-use
+// { when, display } pair. Re-used by the editor when adding a new
+// indicator and by the migration when filling in a legacy record.
+const BINARY_SENSOR_PRESETS = {
+  motion:     { icon: "mdi:motion-sensor",  color: "#ff9800" },
+  occupancy:  { icon: "mdi:motion-sensor",  color: "#ff9800" },
+  presence:   { icon: "mdi:motion-sensor",  color: "#ff9800" },
+  door:       { icon: "mdi:door-open",      color: "#f5c542" },
+  garage_door:{ icon: "mdi:garage-open",    color: "#f5c542" },
+  window:     { icon: "mdi:window-open",    color: "#f5c542" },
+  opening:    { icon: "mdi:door-open",      color: "#f5c542" },
+  moisture:   { icon: "mdi:water",          color: "#4fa3ff" },
+  smoke:      { icon: "mdi:smoke",          color: "#ef5350" },
+  gas:        { icon: "mdi:gas-cylinder",   color: "#ef5350" },
+  co:         { icon: "mdi:alert",          color: "#ef5350" },
+  safety:     { icon: "mdi:alert",          color: "#ef5350" },
+  problem:    { icon: "mdi:alert",          color: "#ef5350" },
+  sound:      { icon: "mdi:volume-high",    color: "#43b581" },
+  vibration:  { icon: "mdi:vibrate",        color: "#ff9800" },
+  plug:       { icon: "mdi:power-plug",     color: "#4fa3ff" },
+  power:      { icon: "mdi:flash",          color: "#f5c542" },
+  running:    { icon: "mdi:play-circle",    color: "#43b581" },
+  tamper:     { icon: "mdi:shield-alert",   color: "#ef5350" },
+  battery:    { icon: "mdi:battery-alert",  color: "#ef5350" },
+  _default:   { icon: "mdi:checkbox-marked-circle", color: "#43b581" },
+};
+
+function _mkStateWhen(entityId, spec) {
+  return {
+    type: "state",
+    entity_id: [entityId],
+    attribute: spec.attribute || null,
+    aggregation: spec.aggregation || "any",
+    operator: spec.operator || "eq",
+    value: spec.value,
+    for: 0,
+  };
+}
+
+function _mkNumericWhen(entityId, spec) {
+  return {
+    type: "numeric",
+    entity_id: [entityId],
+    attribute: spec.attribute || null,
+    aggregation: spec.aggregation || "any",
+    operator: spec.operator || "gt",
+    value: spec.value,
+    for: 0,
+  };
+}
+
+function _mkDisplay(icon, color, overrides) {
+  return {
+    icon,
+    color,
+    display_overrides: [],
+    size: null,
+    icon_size: null,
+    animation: (overrides && overrides.animation) || "none",
+    animation_speed: (overrides && overrides.animation_speed) ?? 1,
+    inactive: (overrides && overrides.inactive) || "hide",
+    dim_opacity: 0.3,
+    badge: null,
+    tooltip: null,
+  };
+}
+
+function getIndicatorDefaults(entityId, stateObj) {
+  const domain = getDomain(entityId);
+  const deviceClass = stateObj?.attributes?.device_class;
+  const nameLower = String(entityId || "").toLowerCase();
+
+  if (domain === "binary_sensor") {
+    const preset = BINARY_SENSOR_PRESETS[deviceClass] || null;
+    // device_class missing? Fall back to entity-id pattern scan.
+    if (!preset) {
+      if (/motion|presence|occupancy/.test(nameLower)) return getIndicatorDefaults(entityId, { attributes: { device_class: "motion" } });
+      if (/window/.test(nameLower)) return getIndicatorDefaults(entityId, { attributes: { device_class: "window" } });
+      if (/door|garage/.test(nameLower)) return getIndicatorDefaults(entityId, { attributes: { device_class: "door" } });
+      if (/smoke/.test(nameLower)) return getIndicatorDefaults(entityId, { attributes: { device_class: "smoke" } });
+      if (/moisture|leak|water/.test(nameLower)) return getIndicatorDefaults(entityId, { attributes: { device_class: "moisture" } });
+    }
+    const chosen = preset || BINARY_SENSOR_PRESETS._default;
+    return {
+      when: _mkStateWhen(entityId, { operator: "in", value: ["on", "detected", "home", "open", "opening"] }),
+      display: _mkDisplay(chosen.icon, chosen.color),
+    };
+  }
+
+  if (domain === "light") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "eq", value: "on" }),
+      display: _mkDisplay("mdi:lightbulb", "#f5c542"),
+    };
+  }
+  if (domain === "switch" || domain === "input_boolean") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "eq", value: "on" }),
+      display: _mkDisplay("mdi:toggle-switch", "#4fa3ff"),
+    };
+  }
+  if (domain === "fan") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "eq", value: "on" }),
+      display: _mkDisplay("mdi:fan", "#43b581", { animation: "spin", animation_speed: 1 }),
+    };
+  }
+  if (domain === "media_player") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "in", value: ["playing", "on", "paused"] }),
+      display: _mkDisplay("mdi:speaker", "#43b581"),
+    };
+  }
+  if (domain === "camera") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "in", value: ["streaming", "recording"] }),
+      display: _mkDisplay("mdi:cctv", "#4fa3ff"),
+    };
+  }
+  if (domain === "vacuum") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "in", value: ["cleaning", "returning"] }),
+      display: _mkDisplay("mdi:robot-vacuum", "#4fa3ff"),
+    };
+  }
+  if (domain === "cover") {
+    const icon = /garage/.test(nameLower) ? "mdi:garage-open" : "mdi:window-open";
+    return {
+      when: _mkStateWhen(entityId, { operator: "eq", value: "open" }),
+      display: _mkDisplay(icon, "#f5c542"),
+    };
+  }
+  if (domain === "weather") {
+    // Weather is usually always-visible with state-based icon swapping.
+    const display = _mkDisplay("mdi:weather-partly-cloudy", "#4fa3ff", { inactive: "show" });
+    display.display_overrides = [
+      { match: { operator: "eq", value: "sunny" },       icon: "mdi:weather-sunny" },
+      { match: { operator: "eq", value: "clear-night" }, icon: "mdi:weather-night" },
+      { match: { operator: "eq", value: "rainy" },       icon: "mdi:weather-rainy" },
+      { match: { operator: "eq", value: "pouring" },     icon: "mdi:weather-pouring" },
+      { match: { operator: "eq", value: "snowy" },       icon: "mdi:weather-snowy" },
+      { match: { operator: "eq", value: "cloudy" },      icon: "mdi:weather-cloudy" },
+      { match: { operator: "eq", value: "partlycloudy" },icon: "mdi:weather-partly-cloudy" },
+      { match: { operator: "eq", value: "windy" },       icon: "mdi:weather-windy" },
+      { match: { operator: "eq", value: "fog" },         icon: "mdi:weather-fog" },
+    ];
+    return {
+      when: _mkStateWhen(entityId, { operator: "ne", value: "unavailable" }),
+      display,
+    };
+  }
+  if (domain === "climate") {
+    const modes = stateObj?.attributes?.hvac_modes || [];
+    if (modes.includes("heat")) {
+      return {
+        when: _mkStateWhen(entityId, { attribute: "hvac_action", operator: "eq", value: "heating" }),
+        display: _mkDisplay("mdi:radiator", "#ef5350"),
+      };
+    }
+    if (modes.includes("cool")) {
+      return {
+        when: _mkStateWhen(entityId, { attribute: "hvac_action", operator: "eq", value: "cooling" }),
+        display: _mkDisplay("mdi:air-conditioner", "#4fa3ff"),
+      };
+    }
+    return {
+      when: _mkStateWhen(entityId, { operator: "ne", value: "off" }),
+      display: _mkDisplay("mdi:thermostat", "#4fa3ff"),
+    };
+  }
+  if (domain === "lock") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "eq", value: "unlocked" }),
+      display: _mkDisplay("mdi:lock-open-variant", "#ef5350"),
+    };
+  }
+  if (domain === "person" || domain === "device_tracker") {
+    return {
+      when: _mkStateWhen(entityId, { operator: "eq", value: "home" }),
+      display: _mkDisplay("mdi:account", "#43b581"),
+    };
+  }
+  if (domain === "sensor") {
+    if (deviceClass === "temperature") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 25 }),
+        display: _mkDisplay("mdi:thermometer", "#ff9800"),
+      };
+    }
+    if (deviceClass === "humidity") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 60 }),
+        display: _mkDisplay("mdi:water-percent", "#4fa3ff"),
+      };
+    }
+    if (deviceClass === "power" || deviceClass === "apparent_power") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 100 }),
+        display: _mkDisplay("mdi:flash", "#f5c542"),
+      };
+    }
+    if (deviceClass === "energy") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 0 }),
+        display: _mkDisplay("mdi:lightning-bolt", "#f5c542"),
+      };
+    }
+    if (deviceClass === "illuminance") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 1000 }),
+        display: _mkDisplay("mdi:brightness-7", "#f5c542"),
+      };
+    }
+    if (deviceClass === "moisture") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "lt", value: 60 }),
+        display: _mkDisplay("mdi:water", "#4fa3ff"),
+      };
+    }
+    if (deviceClass === "pressure") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 1015 }),
+        display: _mkDisplay("mdi:gauge", "#4fa3ff"),
+      };
+    }
+    if (deviceClass === "co2" || deviceClass === "carbon_dioxide") {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 1000 }),
+        display: _mkDisplay("mdi:molecule-co2", "#ef5350"),
+      };
+    }
+    // Generic sensor: numeric-or-state heuristic.
+    if (parseNumber(stateObj?.state) !== null) {
+      return {
+        when: _mkNumericWhen(entityId, { operator: "gt", value: 0 }),
+        display: _mkDisplay("mdi:gauge", "#43b581"),
+      };
+    }
+    return {
+      when: _mkStateWhen(entityId, { operator: "truthy" }),
+      display: _mkDisplay("mdi:information-outline", "#43b581"),
+    };
+  }
+
+  // Entity-id name fallbacks for anything we didn't recognize above.
+  if (/motion|presence|occupancy/.test(nameLower)) {
+    return {
+      when: _mkStateWhen(entityId, { operator: "in", value: ["on", "detected", "home"] }),
+      display: _mkDisplay("mdi:motion-sensor", "#ff9800"),
+    };
+  }
+  if (/door|garage/.test(nameLower)) {
+    return {
+      when: _mkStateWhen(entityId, { operator: "in", value: ["on", "open", "opening"] }),
+      display: _mkDisplay("mdi:door-open", "#f5c542"),
+    };
+  }
+  if (/window/.test(nameLower)) {
+    return {
+      when: _mkStateWhen(entityId, { operator: "in", value: ["on", "open", "opening"] }),
+      display: _mkDisplay("mdi:window-open", "#f5c542"),
+    };
+  }
+
+  return {
+    when: _mkStateWhen(entityId, { operator: "truthy" }),
+    display: _mkDisplay("mdi:circle", "#43b581"),
+  };
+}
+
+function normalizeRule(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const type = raw.type || "state";
+  if (type === "and" || type === "or") {
+    return {
+      type,
+      rules: Array.isArray(raw.rules) ? raw.rules.map(normalizeRule).filter(Boolean) : [],
+    };
+  }
+  if (type === "not") {
+    return { type: "not", rule: normalizeRule(raw.rule) };
+  }
+  if (type === "time") {
+    return {
+      type: "time",
+      after: typeof raw.after === "string" ? raw.after : "",
+      before: typeof raw.before === "string" ? raw.before : "",
+    };
+  }
+  if (type === "numeric") {
+    return {
+      type: "numeric",
+      entity_id: toEntityList(raw.entity_id),
+      attribute: typeof raw.attribute === "string" && raw.attribute ? raw.attribute : null,
+      aggregation: raw.aggregation || "any",
+      operator: raw.operator || "gt",
+      value: raw.value,
+      for: parseNumber(raw.for) ?? 0,
+    };
+  }
+  // Default to state rule.
+  return {
+    type: "state",
+    entity_id: toEntityList(raw.entity_id),
+    attribute: typeof raw.attribute === "string" && raw.attribute ? raw.attribute : null,
+    aggregation: raw.aggregation || "any",
+    operator: raw.operator || "eq",
+    value: raw.value,
+    for: parseNumber(raw.for) ?? 0,
+  };
+}
+
+function normalizeDisplayOverrideMatch(m, defaultOp) {
+  const out = { operator: m?.operator || defaultOp, value: m?.value };
+  if (m?.entity_id) out.entity_id = m.entity_id;
+  if (m?.attribute) out.attribute = m.attribute;
+  if (m?.type) out.type = m.type;
+  return out;
+}
+
+function normalizeDisplay(raw, fallback) {
+  const source = (raw && typeof raw === "object") ? raw : {};
+  const base = fallback || _mkDisplay("mdi:circle", "#43b581");
+  const overrides = Array.isArray(source.display_overrides)
+    ? source.display_overrides
+        .filter((entry) => entry && entry.match)
+        .map((entry) => {
+          const o = { match: normalizeDisplayOverrideMatch(entry.match, "gt") };
+          if (entry.icon) o.icon = entry.icon;
+          if (entry.color) o.color = entry.color;
+          if (entry.animation) o.animation = entry.animation;
+          if (entry.animation_speed != null) o.animation_speed = entry.animation_speed;
+          if (entry.size != null) o.size = entry.size;
+          if (entry.icon_size != null) o.icon_size = entry.icon_size;
+          if (entry.inactive) o.inactive = entry.inactive;
+          if (entry.dim_opacity != null) o.dim_opacity = entry.dim_opacity;
+          if (entry.tooltip) o.tooltip = entry.tooltip;
+          if (entry.badge) o.badge = {
+            text: typeof entry.badge.text === "string" ? entry.badge.text : "",
+            color: typeof entry.badge.color === "string" ? entry.badge.color : "",
+          };
+          return o;
+        })
+    : [];
+  const animation = ["none", "pulse", "spin", "blink", "bounce", "shake"].includes(source.animation)
+    ? source.animation
+    : base.animation;
+  const inactive = ["hide", "dim", "show"].includes(source.inactive)
+    ? source.inactive
+    : base.inactive;
+  const badge = source.badge && typeof source.badge === "object"
+    ? {
+        text: typeof source.badge.text === "string" ? source.badge.text : "",
+        color: typeof source.badge.color === "string" ? source.badge.color : "",
+      }
+    : null;
+  return {
+    icon: typeof source.icon === "string" && source.icon ? source.icon : base.icon,
+    color: typeof source.color === "string" ? source.color : base.color,
+    display_overrides: overrides,
+    size: parseNumber(source.size),
+    icon_size: parseNumber(source.icon_size),
+    animation,
+    animation_speed: parseNumber(source.animation_speed) ?? base.animation_speed,
+    inactive,
+    dim_opacity: parseNumber(source.dim_opacity) ?? base.dim_opacity,
+    badge,
+    tooltip: typeof source.tooltip === "string" && source.tooltip ? source.tooltip : null,
+  };
+}
+
+function normalizeIndicator(raw) {
+  const source = (raw && typeof raw === "object") ? raw : {};
+  const whenRule = normalizeRule(source.when) || _mkStateWhen("", { operator: "truthy" });
+  const andIf = Array.isArray(source.and_if)
+    ? source.and_if.map(normalizeRule).filter(Boolean)
+    : [];
+  const display = normalizeDisplay(source.display, null);
+  return {
+    id: source.id || makeId("indicator"),
+    name: typeof source.name === "string" ? source.name : "",
+    when: whenRule,
+    and_if: andIf,
+    display,
+    tap_action: source.tap_action && typeof source.tap_action === "object"
+      ? source.tap_action
+      : { action: "more-info" },
+    hold_action: source.hold_action && typeof source.hold_action === "object"
+      ? source.hold_action
+      : { action: "none" },
+    for_duration: parseNumber(source.for_duration) ?? 0,
+    // Informational only — lets the editor show the "preset" that was used
+    // to seed the indicator. Never read by the runtime.
+    role: typeof source.role === "string" ? source.role : "",
+    entity_id: typeof source.entity_id === "string" ? source.entity_id : "",
+  };
+}
+
+function detectIndicatorRole(entityId, stateObj) {
+  const domain = getDomain(entityId);
+  const deviceClass = stateObj?.attributes?.device_class;
+
+  if (deviceClass === "motion" || /motion|presence|occupancy/i.test(entityId || "")) {
+    return "movement";
+  }
+  if (entityLooksLikeWindow(entityId, stateObj)) {
+    return "window";
+  }
+  if (entityLooksLikeDoor(entityId, stateObj)) {
+    return "door";
+  }
+  if (domain === "fan" || /fan/i.test(entityId || "")) {
+    return "fan";
+  }
+  if (domain === "climate") {
+    const hvacModes = stateObj?.attributes?.hvac_modes || [];
+    if (hvacModes.includes("cool") && !hvacModes.includes("heat")) {
+      return "cooling";
+    }
+    if (hvacModes.includes("heat")) {
+      return "heating";
+    }
+  }
+  if (/cool|airco|ac\b|air_condition/i.test(entityId || "")) {
+    return "cooling";
+  }
+  if (/heat|heater|radiator|boiler/i.test(entityId || "")) {
+    return "heating";
+  }
+  return "";
+}
+
+// Interprets simple template placeholders in tooltip / badge strings.
+// Supported tokens (no eval, just text substitution):
+//   {{entity}}  → first entity_id referenced by the `when` rule
+//   {{state}}   → raw state of that entity
+//   {{value}}   → numeric representative value, if any
+//   {{attr.X}}  → attributes.X of that entity
+function renderIndicatorTemplate(template, representative) {
+  if (!template || typeof template !== "string") return "";
+  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => {
+    if (key === "entity") return representative.entityId || "";
+    if (key === "state") return representative.raw == null ? "" : String(representative.raw);
+    if (key === "value") return representative.value == null ? "" : String(representative.value);
+    if (key.startsWith("attr.")) {
+      const path = key.slice(5);
+      const v = getAttrPath(representative.stateObj, path);
+      return v == null ? "" : String(v);
+    }
+    return "";
+  });
+}
+
+function indicatorIsActive(indicator, hass, ctx) {
+  return evaluateIndicatorRaw(indicator, hass, ctx);
+}
+
+function buildIndicatorModel(hass, config, indicator, ctx) {
+  const display = indicator.display || normalizeDisplay(null, null);
+  // Prefer the cached eval populated by `_refreshTrueSince`: it was just
+  // computed seconds ago against the same hass snapshot, so re-running
+  // `evaluateIndicatorRaw` + the rep-value walk here would be pure waste.
+  const cached = ctx?.indicatorEval?.get(indicator.id);
+  const repCandidates = ctx?.indicatorRepCandidates?.get(indicator.id);
+  const representative = cached?.representative
+    || getIndicatorRepresentativeValue(indicator, hass, repCandidates);
+  const rawActive = cached
+    ? cached.raw
+    : evaluateIndicatorRaw(indicator, hass, ctx);
+  // Apply `for_duration` gate using the card-level trueSince map.
+  const duration = parseNumber(indicator.for_duration) ?? 0;
+  let active = rawActive;
+  if (rawActive && duration > 0 && ctx?.trueSince) {
+    const since = ctx.trueSince.get(indicator.id);
+    const now = ctx.now ? ctx.now.getTime() : Date.now();
+    if (!since || (now - since) < duration * 1000) {
+      active = false;
+    }
+  }
+
+  // Display override precedence: first matching display_overrides entry
+  // wins; unset fields fall back to the base display defaults.
+  const override = pickDisplayOverride(display.display_overrides, representative, hass);
+  const color = (override?.color) || display.color || "#43b581";
+  const icon = (override?.icon) || display.icon || "mdi:circle";
+  const iconSize = (override?.icon_size != null ? override.icon_size : display.icon_size);
+  const size = (override?.size != null ? override.size : display.size);
+  const animation = override?.animation || display.animation || "none";
+  const animationSpeed = parseNumber(override?.animation_speed) ?? parseNumber(display.animation_speed) ?? 1;
+  const inactive = override?.inactive || display.inactive || "hide";
+  const dimOpacity = (override?.dim_opacity != null ? override.dim_opacity : null) ?? parseNumber(display.dim_opacity) ?? 0.3;
+  const tooltipSrc = override?.tooltip || display.tooltip;
+  const badgeSrc = override?.badge || display.badge;
+
+  // Visibility rules:
+  //   hide  → only show when active, otherwise drop from the DOM
+  //   dim   → always render, fade when inactive
+  //   show  → always render at full opacity
+  const visible = active || inactive !== "hide";
+  const dim = !active && inactive === "dim";
+
+  const tooltipText = tooltipSrc
+    ? renderIndicatorTemplate(tooltipSrc, representative)
+    : (indicator.name || "");
+  const badge = badgeSrc
+    ? {
+        text: renderIndicatorTemplate(badgeSrc.text || "", representative),
+        color: badgeSrc.color || "",
+      }
+    : null;
+
+  return {
+    id: indicator.id,
+    name: indicator.name || "",
+    tooltip: tooltipText,
+    icon,
+    color,
+    iconSize,
+    size,
+    animation,
+    animationSpeed,
+    inactive,
+    dimOpacity,
+    badge,
+    active,
+    visible,
+    dim,
+    entityId: representative.entityId || "",
+    tap_action: indicator.tap_action,
+    hold_action: indicator.hold_action,
+  };
+}
+
+// Returns the icon to use for the card. Custom override wins; otherwise
+// falls back to the first selected area's icon, then a generic default.
+function getAreasIcon(areasMeta, config) {
+  if (config.icon) return config.icon;
+  for (const meta of areasMeta) {
+    if (meta?.icon) return meta.icon;
+  }
+  return "mdi:home-group";
+}
+
+// Joins all selected area names with " + ". Custom title override wins.
+function getAreasTitle(areasMeta, config) {
+  if (config.title) return config.title;
+  const names = areasMeta.filter(Boolean).map((meta) => getAreaName(meta));
+  return names.join(" + ") || "Area";
+}
+
+function buildCardModel(hass, registry, config, ctx) {
+  const areaIds = getConfigAreaIds(config);
+  const areasMeta = areaIds.map((id) => getAreaMeta(registry, id));
+  // Compute the area entity list once and share it across all chips.
+  // Prefer a precomputed list from the card (cached across renders) to
+  // avoid re-scanning `hass.states` for every hass tick.
+  const areaEntityIds = ctx?.areaEntityIds || getAreasEntityIds(hass, registry, areaIds);
+  const chips = config.chips
+    .map((chip) => buildChipModel(hass, registry, config, chip, areaEntityIds))
+    .filter((chip) => chip.visible);
+  const indicators = config.activity_indicators
+    .map((indicator) => buildIndicatorModel(hass, config, indicator, ctx))
+    .filter((indicator) => indicator.visible);
+  const styling = config.styling || normalizeStyling({});
+  return {
+    title: getAreasTitle(areasMeta, config),
+    icon: getAreasIcon(areasMeta, config),
+    iconStyle: config.icon_style || "plain",
+    showTitle: styling.show_title !== false,
+    showIcon: styling.show_icon !== false,
+    styling,
+    chips,
+    indicators,
+    tap_action: config.tap_action || { action: "none" },
+    hold_action: config.hold_action || { action: "none" },
+  };
+}
+
+// Lightweight fingerprint for snapshot-based change detection. Captures
+// exactly the fields that affect the rendered DOM — nothing more. Avoids
+// JSON.stringify which allocates large intermediate strings and traverses
+// every nested object (tap_action, hold_action, entityIds, etc.) that
+// have no effect on the visual output.
+function buildModelFingerprint(model) {
+  let fp = `${model.title}\t${model.icon}\t${model.iconStyle}\t${model.showTitle}\t${model.showIcon}\n`;
+  for (let i = 0; i < model.chips.length; i++) {
+    const c = model.chips[i];
+    fp += `${c.id}\t${c.icon}\t${c.text}\t${c.color}\t${c.active}\n`;
+  }
+  fp += "|\n";
+  for (let i = 0; i < model.indicators.length; i++) {
+    const ind = model.indicators[i];
+    const badgeKey = ind.badge ? `${ind.badge.text}/${ind.badge.color}` : "";
+    fp += `${ind.id}\t${ind.icon}\t${ind.color}\t${ind.iconSize}\t${ind.size}\t${ind.animation}\t${ind.animationSpeed}\t${ind.active}\t${ind.dim}\t${ind.tooltip}\t${badgeKey}\n`;
+  }
+  return fp;
+}
+
+function availableAreaEntityIds(hass, registry, areaIds) {
+  return getAreasEntityIds(hass, registry, areaIds).filter((entityId) => hass.states[entityId]);
+}
+
+function getChipCandidates(hass, registry, areaIds, type) {
+  return sortByLabel(availableAreaEntityIds(hass, registry, areaIds), (entityId) => getEntityLabel(hass, entityId)).filter((entityId) => {
+    const stateObj = hass.states[entityId];
+    if (!stateObj) {
+      return false;
+    }
+    switch (type) {
+      case "lights":
+        return getDomain(entityId) === "light";
+      case "music":
+        return getDomain(entityId) === "media_player";
+      case "temperature":
+        return isTemperatureEntity(stateObj, entityId);
+      case "humidity":
+        return isHumidityEntity(stateObj, entityId);
+      case "lux":
+        return isLuxEntity(stateObj, entityId);
+      default:
+        return false;
+    }
+  });
+}
+
+function getIndicatorCandidates(hass, registry, areaIds) {
+  return sortByLabel(availableAreaEntityIds(hass, registry, areaIds), (entityId) => getEntityLabel(hass, entityId)).filter((entityId) => {
+    const stateObj = hass.states[entityId];
+    if (!stateObj) {
+      return false;
+    }
+    const role = detectIndicatorRole(entityId, stateObj);
+    return Boolean(role);
+  });
+}
+
+function getAllIndicatorCandidates(hass) {
+  if (!hass?.states) return [];
+  return sortByLabel(
+    Object.keys(hass.states).filter((entityId) => {
+      const stateObj = hass.states[entityId];
+      return stateObj && detectIndicatorRole(entityId, stateObj);
+    }),
+    (entityId) => getEntityLabel(hass, entityId)
+  );
+}
+
+function parseJsonOrEmpty(value) {
+  if (!value || !String(value).trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function performNavigation(path) {
+  if (!path) {
+    return;
+  }
+  history.pushState(null, "", path);
+  fireEvent(window, "location-changed", { replace: false });
+}
+
+class AdvancedAreaCard extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("advanced-area-card-editor");
+  }
+
+  static getStubConfig() {
+    return normalizeConfig({
+      type: DEFAULT_CARD_TYPE,
+      chips: [],
+      activity_indicators: [],
+    });
+  }
+
+  static get properties() {
+    return {};
+  }
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = null;
+    this._hass = null;
+    this._registry = null;
+    this._lastSnapshot = null;
+    this._lastBranch = null;
+    // Rule engine bookkeeping.
+    this._indicatorDeps = new Map();   // entity_id -> Set<indicator_id>
+    this._indicatorEntityIds = new Map(); // indicator_id -> Array<entity_id> (cached rule deps)
+    this._indicatorRepCandidates = new Map(); // indicator_id -> [{id, attr}] (cached rep walk)
+    this._indicatorEval = new Map();   // indicator_id -> { raw, representative } (last eval)
+    this._timeIndicators = new Set();  // indicator ids whose rules depend on time-of-day
+    this._trueSince = new Map();       // indicator_id -> ms timestamp since which raw rule has been true
+    this._forTimers = new Map();       // indicator_id -> setTimeout id waking up when `for_duration` elapses
+    this._timeTickerId = null;
+    // Event delegation: single set of listeners on the shadow root.
+    this._modelIndex = new Map();      // "kind:id" -> modelItem
+    this._delegationBound = false;
+    // Persistent shadow-DOM shell. The <style>, <ha-card> and content
+    // wrapper are created once and reused; re-renders only replace the
+    // wrapper's innerHTML. Wiping the whole shadow root would also wipe
+    // <style> nodes injected by theming tools (card-mod), which is how
+    // transparent-card themes lose their background after a re-render.
+    this._styleEl = null;
+    this._cardEl = null;
+    this._contentEl = null;
+    // Perf: watched-entities cache. Only re-render / re-evaluate when
+    // entities the card actually cares about changed. Invalidated only
+    // when setConfig runs or the registry reference changes.
+    this._watchedExplicit = new Set(); // indicator rule deps + custom chip entities
+    this._watchedAreaIds = new Set();  // configured area ids
+    this._watchedAreaEntities = null;  // lazy Set<entity_id> — entities in watched areas
+    this._watchedAreaKey = null;       // invalidation key for the above
+    this._areaEntityIdsArray = null;   // Array<entity_id> fed to buildCardModel
+  }
+
+  disconnectedCallback() {
+    if (this._timeTickerId !== null) {
+      clearInterval(this._timeTickerId);
+      this._timeTickerId = null;
+    }
+    for (const id of this._forTimers.values()) clearTimeout(id);
+    this._forTimers.clear();
+  }
+
+  setConfig(config) {
+    this._config = normalizeConfig(config);
+    this._lastSnapshot = null;
+    this._lastBranch = null;
+    this._rebuildIndicatorDependencies();
+    this._rebuildWatchedSets();
+    this._updateTimeTicker();
+    this.render();
+  }
+
+  set hass(hass) {
+    const prevHass = this._hass;
+    this._hass = hass;
+    if (!this._registry) {
+      // Kick off registry load (one-time). First paint happens below.
+      ensureRegistry(hass).then((registry) => {
+        this._registry = registry;
+        this._watchedAreaKey = null;
+        this._watchedAreaEntities = null;
+        this._areaEntityIdsArray = null;
+        this.render();
+      });
+      this._refreshTrueSince(prevHass);
+      this.render();
+      return;
+    }
+    // Identify the subset of watched entities that actually changed. If
+    // none changed AND no time-of-day indicators are armed, the rendered
+    // output cannot have changed either — skip the entire render path.
+    // This turns a hot "runs on every HA state event" code path into a
+    // cheap Map/Set lookup when the event doesn't touch anything we
+    // care about.
+    const changed = this._collectChangedWatchedEntities(prevHass, hass);
+    if (changed === null) {
+      // Full-refresh signal (first render, states count changed, etc.).
+      this._refreshTrueSince(prevHass);
+      this.render();
+      return;
+    }
+    if (changed.size === 0 && this._timeIndicators.size === 0) {
+      return; // Nothing relevant changed.
+    }
+    this._refreshTrueSince(prevHass, changed);
+    this.render();
+  }
+
+  // Compute the set of watched entities that changed between two hass
+  // snapshots. Returns `null` to signal a full refresh is required
+  // (first hass, entity added/removed, registry not yet loaded).
+  _collectChangedWatchedEntities(prevHass, hass) {
+    if (!prevHass || !hass?.states) return null;
+    // New/removed entities in hass.states invalidate the area-entity
+    // cache and force a full refresh (chip output for area-based chips
+    // can change without an existing entity mutating).
+    const prevStates = prevHass.states || {};
+    const prevCount = Object.keys(prevStates).length;
+    const nextCount = Object.keys(hass.states).length;
+    if (prevCount !== nextCount) {
+      this._watchedAreaKey = null;
+      this._watchedAreaEntities = null;
+      this._areaEntityIdsArray = null;
+      return null;
+    }
+    const changed = new Set();
+    for (const id of this._watchedExplicit) {
+      if (prevStates[id] !== hass.states[id]) changed.add(id);
+    }
+    const areaEntities = this._ensureWatchedAreaEntities();
+    if (areaEntities) {
+      for (const id of areaEntities) {
+        if (prevStates[id] !== hass.states[id]) changed.add(id);
+      }
+    }
+    return changed;
+  }
+
+  // Resolve the set of entities in the configured areas. Cached by
+  // (registry identity, area ids, state key-count) — rebuilt only when
+  // the registry reloads, the config changes, or an entity is
+  // added/removed from hass.states.
+  _ensureWatchedAreaEntities() {
+    if (!this._registry || !this._hass || this._watchedAreaIds.size === 0) {
+      return null;
+    }
+    ensureRegistryMaps(this._registry);
+    const map = registryMaps.entityToArea;
+    if (!map) return null;
+    const stateKeyCount = Object.keys(this._hass.states).length;
+    const areaJoin = [...this._watchedAreaIds].sort().join(",");
+    const key = `${registryMaps.ref ? "r" : "n"}:${areaJoin}:${stateKeyCount}`;
+    if (this._watchedAreaKey === key && this._watchedAreaEntities) {
+      return this._watchedAreaEntities;
+    }
+    const areaIds = this._watchedAreaIds;
+    const set = new Set();
+    for (const entityId in this._hass.states) {
+      const areaId = map.get(entityId);
+      if (areaId && areaIds.has(areaId)) set.add(entityId);
+    }
+    this._watchedAreaEntities = set;
+    this._watchedAreaKey = key;
+    this._areaEntityIdsArray = null; // derived list is stale
+    return set;
+  }
+
+  // Build (and cache) the Array<entity_id> passed into buildCardModel,
+  // so render() doesn't iterate `Object.keys(hass.states)` every tick.
+  _getAreaEntityIdsForRender() {
+    const set = this._ensureWatchedAreaEntities();
+    if (!set) return [];
+    if (!this._areaEntityIdsArray) {
+      this._areaEntityIdsArray = Array.from(set);
+    }
+    return this._areaEntityIdsArray;
+  }
+
+  // Recompute the entity_id -> indicator_id dependency index and the set
+  // of indicators that rely on time-of-day conditions. Called whenever
+  // the config changes; cheap (O(rules)) and never runs on hot paths.
+  _rebuildIndicatorDependencies() {
+    this._indicatorDeps = new Map();
+    this._indicatorEntityIds = new Map();
+    this._indicatorRepCandidates = new Map();
+    this._indicatorEval = new Map();
+    this._timeIndicators = new Set();
+    for (const indicator of (this._config?.activity_indicators || [])) {
+      // Cache the rule-entity list per indicator so `_refreshTrueSince`
+      // doesn't re-walk the rule tree on every hass tick.
+      const entityIds = Array.from(collectIndicatorEntityIds(indicator));
+      this._indicatorEntityIds.set(indicator.id, entityIds);
+      // Cache the representative-value candidate walk for the same
+      // reason — used by `buildIndicatorModel` on every render.
+      this._indicatorRepCandidates.set(indicator.id, collectIndicatorRepCandidates(indicator));
+      for (const entityId of entityIds) {
+        if (!this._indicatorDeps.has(entityId)) {
+          this._indicatorDeps.set(entityId, new Set());
+        }
+        this._indicatorDeps.get(entityId).add(indicator.id);
+      }
+      if (indicatorHasTime(indicator)) {
+        this._timeIndicators.add(indicator.id);
+      }
+    }
+  }
+
+  // Rebuild the watched-entity sets from the current config. Called only
+  // on setConfig (and implicitly when the registry ref changes via the
+  // cache key in `_ensureWatchedAreaEntities`).
+  _rebuildWatchedSets() {
+    const cfg = this._config;
+    this._watchedExplicit = new Set();
+    this._watchedAreaIds = new Set();
+    this._watchedAreaEntities = null;
+    this._watchedAreaKey = null;
+    this._areaEntityIdsArray = null;
+    if (!cfg) return;
+    // Every entity referenced by an indicator rule.
+    for (const list of this._indicatorEntityIds.values()) {
+      for (const id of list) this._watchedExplicit.add(id);
+    }
+    // Custom-entity chips reference explicit ids; area-based chips are
+    // covered by the area-entity set computed lazily at hass time.
+    for (const chip of (cfg.chips || [])) {
+      if (chip?.use_custom_entities && Array.isArray(chip.entity_ids)) {
+        for (const id of chip.entity_ids) this._watchedExplicit.add(id);
+      }
+    }
+    for (const id of getConfigAreaIds(cfg)) this._watchedAreaIds.add(id);
+  }
+
+  // A single shared 30 s ticker for time-of-day rules — only armed when
+  // at least one indicator actually needs it.
+  _updateTimeTicker() {
+    const needed = this._timeIndicators.size > 0;
+    if (needed && this._timeTickerId === null) {
+      this._timeTickerId = setInterval(() => this.render(), 30000);
+    } else if (!needed && this._timeTickerId !== null) {
+      clearInterval(this._timeTickerId);
+      this._timeTickerId = null;
+    }
+  }
+
+  // Recompute the "raw rule has been true since ..." map, scheduling a
+  // wake-up timer when the rule becomes true but has a `for_duration`
+  // gate that's not yet satisfied. When `changedSet` is provided, only
+  // indicators whose cached dependency list intersects that set (or
+  // which depend on time-of-day) are re-evaluated.
+  _refreshTrueSince(prevHass, changedSet) {
+    if (!this._hass || !this._config) return;
+    const indicators = this._config.activity_indicators || [];
+    const now = Date.now();
+    const ctx = { now: new Date(now), trueSince: this._trueSince };
+    for (const indicator of indicators) {
+      // Fast path: if none of its entities changed and it has no time
+      // rules, skip re-evaluation. When a precomputed changedSet is
+      // available we do an O(deps) intersection; otherwise we fall back
+      // to comparing state object identities (HA reuses the same object
+      // reference for entities whose state didn't change).
+      let changed = false;
+      if (prevHass) {
+        if (this._timeIndicators.has(indicator.id)) {
+          changed = true;
+        } else {
+          const deps = this._indicatorEntityIds.get(indicator.id) || [];
+          if (changedSet) {
+            for (const id of deps) {
+              if (changedSet.has(id)) { changed = true; break; }
+            }
+          } else {
+            for (const id of deps) {
+              if (prevHass.states?.[id] !== this._hass.states?.[id]) {
+                changed = true;
+                break;
+              }
+            }
+          }
+        }
+      } else {
+        changed = true;
+      }
+      if (!changed) continue;
+      const raw = evaluateIndicatorRaw(indicator, this._hass, ctx);
+      // Cache raw + representative so the subsequent render doesn't
+      // redo the same work against the same hass snapshot.
+      const repCandidates = this._indicatorRepCandidates.get(indicator.id);
+      const representative = getIndicatorRepresentativeValue(indicator, this._hass, repCandidates);
+      this._indicatorEval.set(indicator.id, { raw, representative });
+      if (raw) {
+        if (!this._trueSince.has(indicator.id)) {
+          this._trueSince.set(indicator.id, now);
+        }
+        const duration = parseNumber(indicator.for_duration) ?? 0;
+        if (duration > 0) {
+          const remaining = Math.max(0, (duration * 1000) - (now - this._trueSince.get(indicator.id)));
+          if (remaining > 0) this._scheduleForTimer(indicator.id, remaining);
+          else this._clearForTimer(indicator.id);
+        }
+      } else {
+        this._trueSince.delete(indicator.id);
+        this._clearForTimer(indicator.id);
+      }
+    }
+  }
+
+  _scheduleForTimer(indicatorId, ms) {
+    this._clearForTimer(indicatorId);
+    const timer = setTimeout(() => {
+      this._forTimers.delete(indicatorId);
+      this.render();
+    }, ms);
+    this._forTimers.set(indicatorId, timer);
+  }
+
+  _clearForTimer(indicatorId) {
+    const existing = this._forTimers.get(indicatorId);
+    if (existing) {
+      clearTimeout(existing);
+      this._forTimers.delete(indicatorId);
+    }
+  }
+
+  getCardSize() {
+    return 3;
+  }
+
+  connectedCallback() {
+    this.render();
+  }
+
+  // Returns the persistent content wrapper inside <ha-card>, creating the
+  // <style> + <ha-card> shell on first use. Nodes added to the shadow root
+  // or ha-card by third parties (e.g. card-mod theme styles) are left
+  // untouched across re-renders because we never rewrite their parents.
+  _ensureShell() {
+    if (!this._styleEl || this._styleEl.parentNode !== this.shadowRoot) {
+      this._styleEl = document.createElement("style");
+      this._styleEl.textContent = this.styles();
+      this.shadowRoot.appendChild(this._styleEl);
+    }
+    if (!this._cardEl || this._cardEl.parentNode !== this.shadowRoot) {
+      this._cardEl = document.createElement("ha-card");
+      this.shadowRoot.appendChild(this._cardEl);
+      this._contentEl = null;
+    }
+    if (!this._contentEl || this._contentEl.parentNode !== this._cardEl) {
+      this._contentEl = document.createElement("div");
+      this._cardEl.appendChild(this._contentEl);
+    }
+    return this._contentEl;
+  }
+
+  render() {
+    if (!this.shadowRoot) {
+      return;
+    }
+    if (!this._config) {
+      if (this._lastBranch !== "empty") {
+        if (this._cardEl && this._cardEl.parentNode === this.shadowRoot) {
+          this.shadowRoot.removeChild(this._cardEl);
+        }
+        this._cardEl = null;
+        this._contentEl = null;
+        this._lastBranch = "empty";
+        this._lastSnapshot = null;
+      }
+      return;
+    }
+    // Show the demo preview whenever no area is configured. This makes the
+    // dashboard "Add card" picker render a meaningful sample, and does not
+    // depend on hass being ready.
+    if (!getConfigAreaIds(this._config).length) {
+      const demoKey = `demo:${this._config.icon_style || "plain"}`;
+      if (this._lastBranch === "demo" && this._lastSnapshot === demoKey) {
+        return;
+      }
+      this.renderDemoPreview();
+      this._lastBranch = "demo";
+      this._lastSnapshot = demoKey;
+      return;
+    }
+    if (!this._hass) {
+      if (this._lastBranch !== "wait-hass") {
+        this._ensureShell().innerHTML = `<div class="state">Waiting for Home Assistant state.</div>`;
+        this._lastBranch = "wait-hass";
+        this._lastSnapshot = null;
+      }
+      return;
+    }
+    if (!this._registry) {
+      if (this._lastBranch !== "wait-registry") {
+        this._ensureShell().innerHTML = `<div class="state">Loading area registry…</div>`;
+        this._lastBranch = "wait-registry";
+        this._lastSnapshot = null;
+      }
+      return;
+    }
+
+    const model = buildCardModel(this._hass, this._registry, this._config, {
+      now: new Date(),
+      trueSince: this._trueSince,
+      areaEntityIds: this._getAreaEntityIdsForRender(),
+      indicatorEval: this._indicatorEval,
+      indicatorRepCandidates: this._indicatorRepCandidates,
+    });
+    // Snapshot diffing: most state events from Home Assistant don't touch
+    // anything we render. Build a lightweight fingerprint of the visible
+    // model and skip the entire innerHTML rebuild when nothing has changed.
+    // A targeted string concat is vastly cheaper than JSON.stringify on the
+    // full model object (which also allocates many intermediate strings).
+    const snapshot = buildModelFingerprint(model);
+    if (this._lastBranch === "card" && this._lastSnapshot === snapshot) {
+      return;
+    }
+    this._lastBranch = "card";
+    this._lastSnapshot = snapshot;
+    const chipMarkup = model.chips.length
+      ? model.chips
+          .map((chip) => `
+            <button
+              class="chip ${chip.active ? "chip-active" : "chip-inactive"}"
+              data-interactive="true"
+              data-kind="chip"
+              data-id="${htmlEscape(chip.id)}"
+              title="${htmlEscape(chip.label)}"
+            >
+              <ha-icon class="chip-icon" icon="${htmlEscape(chip.icon)}"></ha-icon>
+              <span class="chip-text">${htmlEscape(chip.text)}</span>
+            </button>
+          `)
+          .join("")
+      : `<div class="state-empty">No visible chips configured for this area.</div>`;
+
+    const indicatorMarkup = model.indicators
+      .map((indicator) => {
+        const styleParts = [`--indicator-color:${resolveColor(indicator.color)}`];
+        if (indicator.iconSize) {
+          styleParts.push(`--aac-indicator-icon-size:${indicator.iconSize}px`);
+        }
+        if (indicator.size) {
+          styleParts.push(`--aac-indicator-size:${indicator.size}px`);
+        }
+        // Animation speed is a multiplier — 1 = base, 0.5 = twice as fast.
+        const speed = indicator.animationSpeed || 1;
+        styleParts.push(`--aac-indicator-anim-duration:${(2.4 / Math.max(speed, 0.1)).toFixed(2)}s`);
+        if (!indicator.active && indicator.dim) {
+          styleParts.push(`--aac-indicator-dim-opacity:${indicator.dimOpacity}`);
+        }
+        const classList = ["indicator"];
+        if (indicator.animation && indicator.animation !== "none" && indicator.active) {
+          classList.push(`indicator--anim-${indicator.animation}`);
+        }
+        if (indicator.dim) classList.push("indicator--dim");
+        if (!indicator.active && indicator.inactive === "show") classList.push("indicator--inactive-show");
+        const badgeMarkup = indicator.badge && indicator.badge.text
+          ? `<span class="indicator__badge" style="${indicator.badge.color ? `background:${htmlEscape(resolveColor(indicator.badge.color))}` : ""}">${htmlEscape(indicator.badge.text)}</span>`
+          : "";
+        const tooltip = indicator.tooltip || indicator.name || "";
+        return `
+        <button
+          class="${classList.join(" ")}"
+          data-interactive="true"
+          data-kind="indicator"
+          data-id="${htmlEscape(indicator.id)}"
+          style="${htmlEscape(styleParts.join(";"))}"
+          title="${htmlEscape(tooltip)}"
+        >
+          <ha-icon class="indicator-icon" icon="${htmlEscape(indicator.icon)}"></ha-icon>
+          ${badgeMarkup}
+        </button>
+      `;
+      })
+      .join("");
+
+    const cardHasAction =
+      (model.tap_action && model.tap_action.action && model.tap_action.action !== "none") ||
+      (model.hold_action && model.hold_action.action && model.hold_action.action !== "none");
+
+    const styleVars = buildStyleVars(model.styling);
+    const titleGroup = (model.showIcon || model.showTitle)
+      ? `
+            <div class="title-group">
+              ${model.showIcon ? `
+                <div class="area-icon area-icon-${htmlEscape(model.iconStyle)}">
+                  <ha-icon icon="${htmlEscape(model.icon)}"></ha-icon>
+                </div>
+              ` : ""}
+              ${model.showTitle ? `<div class="title-text">${htmlEscape(model.title)}</div>` : ""}
+            </div>
+          `
+      : "";
+
+    this._ensureShell().innerHTML = `
+      <div class="card-shell ${cardHasAction ? "card-clickable" : ""}" style="${htmlEscape(styleVars)}" ${cardHasAction ? `data-interactive="true" data-kind="card"` : ""}>
+        <div class="header-row">
+          ${titleGroup}
+          <div class="indicator-row">${indicatorMarkup}</div>
+        </div>
+        <div class="chip-row">${chipMarkup}</div>
+      </div>
+    `;
+
+    // Update the shared action-index: a single Map<"kind:id", modelItem>
+    // consulted by the delegated listeners on the shadow root. Avoids
+    // allocating three closures per interactive element on every render.
+    this._modelIndex.clear();
+    for (const chip of model.chips) this._modelIndex.set(`chip:${chip.id}`, chip);
+    for (const ind of model.indicators) this._modelIndex.set(`indicator:${ind.id}`, ind);
+    if (cardHasAction) {
+      this._modelIndex.set("card:", {
+        tap_action: model.tap_action,
+        hold_action: model.hold_action,
+      });
+    }
+    this._bindDelegation();
+    // Chips still need per-element CSS vars applied after the
+    // innerHTML rebuild — this is cheap and targeted.
+    this.shadowRoot.querySelectorAll(".chip[data-kind='chip']").forEach((element) => {
+      const chip = this._modelIndex.get(`chip:${element.dataset.id}`);
+      if (!chip) return;
+      element.style.setProperty("--chip-color", resolveColor(chip.color));
+      element.style.setProperty("--chip-muted-color", resolveColor(chip.mutedColor));
+    });
+  }
+
+  // Attach one set of pointer listeners to the shadow root; they dispatch
+  // to the interactive element found by walking the composed path. Runs
+  // once per card lifetime — no per-render closure allocation.
+  _bindDelegation() {
+    if (this._delegationBound) return;
+    this._delegationBound = true;
+    const root = this.shadowRoot;
+    const findTarget = (event) => {
+      const path = event.composedPath();
+      for (const node of path) {
+        if (node.nodeType === 1 && node.dataset?.interactive === "true") return node;
+      }
+      return null;
+    };
+    root.addEventListener("pointerdown", (event) => {
+      const element = findTarget(event);
+      if (!element) return;
+      const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
+      if (!cfg) return;
+      event.preventDefault();
+      const kind = element.dataset.kind;
+      if (kind === "chip" || kind === "indicator") event.stopPropagation();
+      const state = activeActionMap.get(element) || {};
+      state.cancelled = false;
+      state.held = false;
+      clearTimeout(state.timer);
+      state.timer = window.setTimeout(() => {
+        state.held = true;
+        this.handleAction(cfg.hold_action, cfg.entityIds?.[0] || cfg.entityId);
+      }, ACTION_HOLD_DELAY);
+      activeActionMap.set(element, state);
+    });
+    root.addEventListener("pointerup", (event) => {
+      const element = findTarget(event);
+      if (!element) return;
+      const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
+      if (!cfg) return;
+      const kind = element.dataset.kind;
+      if (kind === "chip" || kind === "indicator") event.stopPropagation();
+      const state = activeActionMap.get(element);
+      if (!state) return;
+      clearTimeout(state.timer);
+      if (!state.held && !state.cancelled) {
+        this.handleAction(cfg.tap_action, cfg.entityIds?.[0] || cfg.entityId);
+      }
+      state.cancelled = false;
+    });
+    const cancel = (event) => {
+      const element = findTarget(event);
+      if (!element) return;
+      const state = activeActionMap.get(element);
+      if (!state) return;
+      state.cancelled = true;
+      clearTimeout(state.timer);
+    };
+    // pointerleave doesn't bubble, so use capture to see it on any descendant.
+    root.addEventListener("pointerleave", cancel, true);
+    root.addEventListener("pointercancel", cancel);
+    root.addEventListener("contextmenu", (event) => {
+      if (findTarget(event)) event.preventDefault();
+    });
+  }
+
+  // Renders a hard-coded "Living Room" sample card so the dashboard's
+  // "Add card" picker shows a meaningful preview before the user has
+  // selected an area.
+  renderDemoPreview() {
+    const demoModel = {
+      title: "Living Room",
+      icon: "mdi:sofa",
+      chips: [
+        {
+          id: "demo-lights", type: "lights", label: "Lights",
+          icon: "mdi:lightbulb", text: "3", active: true, visible: true,
+          color: "#f5c542", mutedColor: "rgba(255,255,255,0.38)",
+        },
+        {
+          id: "demo-temperature", type: "temperature", label: "Temperature",
+          icon: "mdi:thermometer", text: "18°C", active: true, visible: true,
+          color: "#4fa3ff", mutedColor: "rgba(255,255,255,0.38)",
+        },
+        {
+          id: "demo-humidity", type: "humidity", label: "Humidity",
+          icon: "mdi:water-percent", text: "47%", active: true, visible: true,
+          color: "#43b581", mutedColor: "rgba(255,255,255,0.38)",
+        },
+        {
+          id: "demo-music", type: "music", label: "Music",
+          icon: "mdi:speaker", text: "1", active: true, visible: true,
+          color: "#43b581", mutedColor: "rgba(255,255,255,0.38)",
+        },
+      ],
+      indicators: [
+        { id: "demo-movement", label: "Movement", icon: "mdi:motion-sensor", color: "#ff9800" },
+        { id: "demo-door", label: "Door", icon: "mdi:door-open", color: "#f5c542" },
+      ],
+    };
+
+    const chipMarkup = demoModel.chips
+      .map((chip) => `
+        <button class="chip chip-active" tabindex="-1">
+          <ha-icon class="chip-icon" icon="${htmlEscape(chip.icon)}"></ha-icon>
+          <span class="chip-text">${htmlEscape(chip.text)}</span>
+        </button>
+      `)
+      .join("");
+
+    const indicatorMarkup = demoModel.indicators
+      .map((indicator) => `
+        <button
+          class="indicator"
+          tabindex="-1"
+          style="--indicator-color:${htmlEscape(resolveColor(indicator.color))};"
+          title="${htmlEscape(indicator.label || "")}"
+        >
+          <ha-icon class="indicator-icon" icon="${htmlEscape(indicator.icon)}"></ha-icon>
+        </button>
+      `)
+      .join("");
+
+    const iconStyle = this._config?.icon_style || "plain";
+    this._ensureShell().innerHTML = `
+      <div class="card-shell preview-shell">
+        <div class="preview-banner">Preview</div>
+        <div class="header-row">
+          <div class="title-group">
+            <div class="area-icon area-icon-${htmlEscape(iconStyle)}">
+              <ha-icon icon="${htmlEscape(demoModel.icon)}"></ha-icon>
+            </div>
+            <div class="title-text">${htmlEscape(demoModel.title)}</div>
+          </div>
+          <div class="indicator-row">${indicatorMarkup}</div>
+        </div>
+        <div class="chip-row">${chipMarkup}</div>
+      </div>
+    `;
+
+    this.shadowRoot.querySelectorAll(".chip").forEach((element, index) => {
+      const chip = demoModel.chips[index];
+      if (!chip) return;
+      element.style.setProperty("--chip-color", resolveColor(chip.color));
+      element.style.setProperty("--chip-muted-color", resolveColor(chip.mutedColor));
+    });
+  }
+
+  styles() {
+    // Cache the CSS string — it's static per class and never changes.
+    if (AdvancedAreaCard._stylesCache) return AdvancedAreaCard._stylesCache;
+    const css = `
+      :host {
+        display: block;
+      }
+      ha-card {
+        overflow: hidden;
+        border-radius: var(--ha-card-border-radius, 12px);
+        background: var(--ha-card-background, var(--card-background-color));
+        color: var(--primary-text-color);
+        box-shadow: var(--ha-card-box-shadow);
+      }
+      .card-shell {
+        position: relative;
+        padding: 20px;
+      }
+      .card-shell.card-clickable {
+        cursor: pointer;
+      }
+      .header-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .title-group {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        min-width: 0;
+      }
+      .area-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .area-icon-boxed {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: var(--secondary-background-color);
+        color: var(--aac-icon-color, var(--primary-color));
+      }
+      .area-icon-boxed ha-icon {
+        --mdc-icon-size: var(--aac-icon-size, 24px);
+      }
+      .area-icon-plain {
+        color: var(--aac-icon-color, var(--primary-text-color));
+      }
+      .area-icon-plain ha-icon {
+        --mdc-icon-size: var(--aac-icon-size, ${DEFAULT_ICON_SIZE});
+      }
+      .title-text {
+        font-size: var(--aac-title-size, ${DEFAULT_TITLE_SIZE});
+        font-weight: 600;
+        line-height: 1.2;
+        color: var(--aac-title-color, var(--primary-text-color));
+      }
+      .indicator-row {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--aac-indicator-gap, 8px);
+        min-height: 40px;
+        flex-wrap: wrap;
+        margin-left: auto;
+      }
+      .indicator {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--aac-indicator-size, 32px);
+        height: var(--aac-indicator-size, 32px);
+        border: none;
+        border-radius: var(--aac-indicator-radius, 999px);
+        background: color-mix(in srgb, var(--indicator-color) 18%, var(--secondary-background-color));
+        color: var(--indicator-color);
+        box-shadow: inset 0 0 0 1px var(--divider-color);
+        cursor: pointer;
+        transition: opacity 180ms ease;
+      }
+      .indicator-icon {
+        --mdc-icon-size: var(--aac-indicator-icon-size, 16px);
+      }
+      .indicator--dim {
+        opacity: var(--aac-indicator-dim-opacity, 0.3);
+        filter: grayscale(30%);
+      }
+      .indicator--inactive-show {
+        opacity: 1;
+      }
+      .indicator__badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        min-width: 14px;
+        height: 14px;
+        padding: 0 4px;
+        border-radius: 999px;
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        font-size: 9px;
+        line-height: 14px;
+        font-weight: 700;
+        text-align: center;
+        box-sizing: border-box;
+        pointer-events: none;
+      }
+      .indicator--anim-spin .indicator-icon {
+        animation: aac-spin var(--aac-indicator-anim-duration, 2.4s) linear infinite;
+      }
+      .indicator--anim-pulse {
+        animation: aac-pulse var(--aac-indicator-anim-duration, 2.4s) ease-in-out infinite;
+      }
+      .indicator--anim-blink {
+        animation: aac-blink var(--aac-indicator-anim-duration, 2.4s) steps(2, start) infinite;
+      }
+      .indicator--anim-bounce {
+        animation: aac-bounce var(--aac-indicator-anim-duration, 2.4s) ease-in-out infinite;
+      }
+      .indicator--anim-shake .indicator-icon {
+        animation: aac-shake var(--aac-indicator-anim-duration, 2.4s) ease-in-out infinite;
+      }
+      .chip-row {
+        display: flex;
+        gap: var(--aac-chips-gap, 5px);
+        flex-wrap: wrap;
+        margin-top: var(--aac-chips-margin, ${DEFAULT_CHIPS_MARGIN});
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--aac-chip-gap, 5px);
+        border: none;
+        border-radius: var(--aac-chip-radius, 15px);
+        padding: var(--aac-chip-pt, 5px) var(--aac-chip-pr, 10px) var(--aac-chip-pb, 5px) var(--aac-chip-pl, 7px);
+        min-width: var(--aac-chip-min-width, 30px);
+        background: var(--secondary-background-color);
+        color: var(--primary-text-color);
+        cursor: pointer;
+        box-shadow: inset 0 0 0 1px var(--divider-color);
+      }
+      .chip-active {
+        background: color-mix(in srgb, var(--chip-color) 14%, var(--secondary-background-color));
+      }
+      .chip-inactive {
+        opacity: 0.78;
+      }
+      .chip-icon {
+        --mdc-icon-size: var(--aac-chip-icon-size, 20px);
+        color: var(--chip-color, var(--state-icon-color));
+      }
+      .chip-inactive .chip-icon {
+        color: var(--chip-muted-color, var(--disabled-text-color));
+      }
+      .chip-text {
+        font-size: var(--aac-chip-text-size, 0.85714286rem);
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .state,
+      .state-empty {
+        padding: 20px;
+        color: var(--secondary-text-color);
+      }
+      .preview-banner {
+        display: inline-block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 2px 10px;
+        border-radius: 999px;
+        background: var(--secondary-background-color);
+        color: var(--secondary-text-color);
+        margin-bottom: 14px;
+      }
+      .chip:focus-visible,
+      .indicator:focus-visible {
+        outline: 2px solid var(--primary-color);
+        outline-offset: 2px;
+      }
+      @keyframes aac-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      @keyframes aac-pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.14); }
+      }
+      @keyframes aac-blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.25; }
+      }
+      @keyframes aac-bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-3px); }
+      }
+      @keyframes aac-shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-2px) rotate(-6deg); }
+        75% { transform: translateX(2px) rotate(6deg); }
+      }
+      @media (max-width: 640px) {
+        .card-shell {
+          padding: 16px;
+        }
+      }
+    `;
+    AdvancedAreaCard._stylesCache = css;
+    return css;
+  }
+
+  handleAction(actionConfig, fallbackEntityId) {
+    const action = actionConfig?.action || "none";
+    if (!this._hass || action === "none") {
+      return;
+    }
+    if (action === "more-info") {
+      fireEvent(this, "hass-more-info", {
+        entityId: actionConfig?.entity_id || fallbackEntityId,
+      });
+      return;
+    }
+    if (action === "navigate") {
+      performNavigation(actionConfig?.navigation_path);
+      return;
+    }
+    if (action === "url") {
+      if (actionConfig?.url_path) {
+        window.open(actionConfig.url_path, "_blank");
+      }
+      return;
+    }
+    if (action === "toggle") {
+      const entityId = actionConfig?.entity_id || fallbackEntityId;
+      if (entityId) {
+        this._hass.callService("homeassistant", "toggle", { entity_id: entityId });
+      }
+      return;
+    }
+    if (action === "assist") {
+      fireEvent(this, "hass-assist", {});
+      return;
+    }
+    if (action === "call-service" || action === "perform-action") {
+      const serviceString = actionConfig?.service || actionConfig?.perform_action || "";
+      const [domain, service] = serviceString.split(".");
+      if (domain && service) {
+        const serviceData = {
+          ...(actionConfig?.data || actionConfig?.service_data || {}),
+        };
+        if (!serviceData.entity_id && (actionConfig?.entity_id || fallbackEntityId)) {
+          serviceData.entity_id = actionConfig?.entity_id || fallbackEntityId;
+        }
+        this._hass.callService(domain, service, serviceData);
+      }
+    }
+  }
+}
+
+class AdvancedAreaCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._config = normalizeConfig({ type: DEFAULT_CARD_TYPE });
+    this._hass = null;
+    this._registry = null;
+    this._registryLoaded = false;
+    this._pendingIndicatorCandidate = "";
+    this._rendering = false;
+    this._suppressEvents = false;
+    this._selfEmitting = false;
+    this._addingArea = false;
+    this._indicatorShowAll = false;
+    this._boundChange = this.handleChange.bind(this);
+    this._boundClick = this.handleClick.bind(this);
+  }
+
+  connectedCallback() {
+    if (!this._listenersBound) {
+      this._listenersBound = true;
+      this.shadowRoot.addEventListener("click", this._boundClick);
+      this.shadowRoot.addEventListener("change", this._boundChange);
+    }
+    this.render();
+  }
+
+  disconnectedCallback() {
+    if (this._renderRAF) {
+      cancelAnimationFrame(this._renderRAF);
+      this._renderRAF = null;
+    }
+    if (this._listenersBound) {
+      this.shadowRoot.removeEventListener("click", this._boundClick);
+      this.shadowRoot.removeEventListener("change", this._boundChange);
+      this._listenersBound = false;
+    }
+    // Release references for GC; they'll be repopulated on reconnect.
+    this._hass = null;
+    this._registry = null;
+    this._allEntityIdsCache = null;
+    this._allEntityIdsCacheCount = -1;
+  }
+
+  setConfig(config) {
+    const normalized = normalizeConfig(config);
+    // Avoid re-rendering when HA bounces our own emitted config back at us.
+    // Without this, every keystroke in a text field triggers a full DOM rebuild,
+    // which destroys the field mid-typing and causes focus/popup glitches.
+    if (this._selfEmitting) {
+      this._config = normalized;
+      return;
+    }
+    // Fast-path: HA bounces our own emit asynchronously. If we just
+    // fired config-changed within the bounce window, treat this call as
+    // the bounce and skip the full re-render. Cheaper than a deep
+    // serialize+compare on every keystroke.
+    if (this._configEmittedAt && (performance.now() - this._configEmittedAt) < 150) {
+      this._config = normalized;
+      return;
+    }
+    // External change (YAML edit, etc.). Fall back to serialized compare
+    // so we don't rebuild when nothing actually changed.
+    const serialized = JSON.stringify(normalized);
+    if (this._lastConfigJson === serialized) {
+      this._config = normalized;
+      return;
+    }
+    this._lastConfigJson = serialized;
+    this._config = normalized;
+    this.render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._registryLoaded) {
+      this.render();
+      ensureRegistry(hass).then((registry) => {
+        this._registry = registry;
+        this._registryLoaded = true;
+        this.render();
+      });
+    } else {
+      // Post-registry: don't re-render the whole editor (would clobber
+      // focus/scroll). Only refresh the indicator preview panels — those
+      // are the only parts whose content depends on live hass state.
+      this._refreshIndicatorPreviews();
+    }
+  }
+
+  _refreshIndicatorPreviews() {
+    if (!this.shadowRoot || !this._config || !Array.isArray(this._config.activity_indicators)) return;
+    this._config.activity_indicators.forEach((indicator, i) => {
+      // Build the header and inline preview markup fresh and swap them
+      // into their containers. We identify containers by position because
+      // each indicator panel is uniquely indexed — no IDs needed.
+      const panels = this.shadowRoot.querySelectorAll("ha-expansion-panel");
+      // Indicator panels sit after chip panels in render order; find by
+      // querying all panels and skipping the ones whose content isn't a
+      // `.panel-content > [id^="indicator-"]` match.
+      const panel = Array.from(panels).find((p) =>
+        p.querySelector(`#indicator-${i}-basic-form`)
+      );
+      if (!panel) return;
+      const headerWrap = panel.querySelector(".panel-header");
+      if (headerWrap) {
+        // Replace just the previous preview wrap, if any.
+        const existing = headerWrap.querySelector(".indicator-preview-wrap");
+        const fresh = this.renderIndicatorPreview(indicator);
+        if (existing) {
+          const tpl = document.createElement("template");
+          tpl.innerHTML = fresh.trim();
+          existing.replaceWith(tpl.content.firstChild);
+        }
+      }
+      const inline = panel.querySelector(".indicator-preview-inline");
+      if (inline) {
+        const tpl = document.createElement("template");
+        tpl.innerHTML = this.renderIndicatorPreviewInline(indicator).trim();
+        inline.replaceWith(tpl.content.firstChild);
+      }
+    });
+  }
+
+  emitConfig() {
+    // Stamp the emit time so the next (asynchronous) setConfig bounce
+    // from HA can be recognised within the bounce window without a deep
+    // JSON compare. `_lastConfigJson` is only used for external
+    // changes (YAML edits) now, so we don't need to keep it fresh here.
+    this._configEmittedAt = performance.now();
+    this._selfEmitting = true;
+    try {
+      fireEvent(this, "config-changed", { config: this._config });
+    } finally {
+      this._selfEmitting = false;
+    }
+  }
+
+  getAreaOptions() {
+    if (!this._registry) {
+      return [];
+    }
+    return sortByLabel(this._registry.areas, (area) => getAreaName(area));
+  }
+
+  getIndicatorAddCandidateIds() {
+    if (!this._hass) return [];
+    const selected = new Set((this._config.activity_indicators || []).map((ind) => ind.entity_id));
+    if (this._indicatorShowAll) {
+      return getAllIndicatorCandidates(this._hass)
+        .filter((entityId) => !selected.has(entityId));
+    }
+    const areaIds = getConfigAreaIds(this._config);
+    if (!this._registry || !areaIds.length) return [];
+    return getIndicatorCandidates(this._hass, this._registry, areaIds)
+      .filter((entityId) => !selected.has(entityId));
+  }
+
+  renderChipPreview(chip) {
+    const areaIds = getConfigAreaIds(this._config);
+    if (!this._hass || !this._registry || !areaIds.length) {
+      return `<span class="panel-meta">Preview unavailable</span>`;
+    }
+    const preview = buildChipModel(this._hass, this._registry, { areas: areaIds }, chip);
+    return `
+      <div class="chip-preview ${preview.active ? "chip-preview-active" : "chip-preview-inactive"}">
+        <ha-icon icon="${htmlEscape(preview.icon)}"></ha-icon>
+        <span>${htmlEscape(preview.text)}</span>
+      </div>
+    `;
+  }
+
+  // Compact panel-header preview: the rendered indicator button exactly as
+  // it would appear on the card, plus a status pill. We ignore for_duration
+  // here (pass an empty trueSince map) so users see the immediate rule
+  // match rather than waiting out the hold timer.
+  renderIndicatorPreview(indicator) {
+    if (!this._hass) return "";
+    const model = buildIndicatorModel(this._hass, this._config, indicator, {
+      now: new Date(),
+      trueSince: new Map(),
+    });
+    const rawActive = evaluateIndicatorRaw(indicator, this._hass, { now: new Date(), trueSince: new Map() });
+    const styleParts = [`--indicator-color:${resolveColor(model.color)}`];
+    if (model.iconSize) styleParts.push(`--aac-indicator-icon-size:${model.iconSize}px`);
+    if (model.size) styleParts.push(`--aac-indicator-size:${model.size}px`);
+    const speed = model.animationSpeed || 1;
+    styleParts.push(`--aac-indicator-anim-duration:${(2.4 / Math.max(speed, 0.1)).toFixed(2)}s`);
+    if (!rawActive && model.dim) {
+      styleParts.push(`--aac-indicator-dim-opacity:${model.dimOpacity}`);
+    }
+    const classList = ["indicator", "indicator-preview"];
+    if (model.animation && model.animation !== "none" && rawActive) {
+      classList.push(`indicator--anim-${model.animation}`);
+    }
+    if (!rawActive && model.inactive === "dim") classList.push("indicator--dim");
+    if (!rawActive && model.inactive === "show") classList.push("indicator--inactive-show");
+    const badgeMarkup = model.badge && model.badge.text
+      ? `<span class="indicator__badge" style="${model.badge.color ? `background:${htmlEscape(resolveColor(model.badge.color))}` : ""}">${htmlEscape(model.badge.text)}</span>`
+      : "";
+    const statusLabel = rawActive
+      ? "Active"
+      : (model.inactive === "hide" ? "Hidden" : (model.inactive === "dim" ? "Dim" : "Inactive"));
+    const statusClass = rawActive ? "status-active" : "status-inactive";
+    return `
+      <div class="indicator-preview-wrap">
+        <div
+          class="${classList.join(" ")}"
+          style="${htmlEscape(styleParts.join(";"))}"
+        >
+          <ha-icon class="indicator-icon" icon="${htmlEscape(model.icon)}"></ha-icon>
+          ${badgeMarkup}
+        </div>
+        <span class="indicator-status-pill ${statusClass}">${htmlEscape(statusLabel)}</span>
+      </div>
+    `;
+  }
+
+  // Expanded-panel preview strip: shows which entity the rule resolves to
+  // plus the live state so users can verify their rule at a glance.
+  renderIndicatorPreviewInline(indicator) {
+    if (!this._hass) {
+      return `<p class="secondary panel-meta">Preview unavailable — waiting for Home Assistant state.</p>`;
+    }
+    const representative = getIndicatorRepresentativeValue(indicator, this._hass);
+    const rawActive = evaluateIndicatorRaw(indicator, this._hass, { now: new Date(), trueSince: new Map() });
+    const duration = parseNumber(indicator.for_duration) ?? 0;
+    const holdHint = duration > 0
+      ? ` · hold ${duration}s before activating`
+      : "";
+    const entityLine = representative.entityId
+      ? `<code>${htmlEscape(representative.entityId)}</code> = <code>${htmlEscape(String(representative.state ?? "—"))}</code>`
+      : `<span class="panel-meta">No entity resolved from the rule</span>`;
+    const numericLine = representative.value !== undefined && representative.value !== null && representative.value !== ""
+      ? ` (numeric: ${htmlEscape(String(representative.value))})`
+      : "";
+    return `
+      <div class="indicator-preview-inline">
+        <span class="indicator-preview-dot ${rawActive ? "dot-active" : "dot-inactive"}"></span>
+        <span>${entityLine}${numericLine}</span>
+        <span class="panel-meta">${rawActive ? "rule matches" : "rule does not match"}${holdHint}</span>
+      </div>
+    `;
+  }
+
+  _computeLabel(schemaItem) {
+    const LABELS = {
+      area: "Area",
+      title: "Title text",
+      icon: "Icon override",
+      icon_style: "Icon style",
+      entity_ids: "Entities",
+      hidden_when_zero: "Hide when zero/inactive",
+      use_light_color: "Use actual light colors",
+      active_color: "Active color",
+      entity_id: "Entity",
+      add_entity: "Select an entity to add",
+      role: "Role",
+      color: "Color",
+      fan_speed_min: "Fast spin (seconds)",
+      fan_speed_max: "Slow spin (seconds)",
+      action: "Action",
+      navigation_path: "Navigation path",
+      url_path: "URL",
+      service: "Service",
+      service_data: "Service data",
+      value_threshold: "Min active value",
+      show_title: "Show title",
+      show_icon: "Show icon",
+      title_font_size: "Title size (px)",
+      icon_size: "Icon size (px)",
+      chips_margin: "Chips top margin (px)",
+      chips_gap: "Chips gap (px)",
+      chip_padding_top: "Chip padding top (px)",
+      chip_padding_right: "Chip padding right (px)",
+      chip_padding_bottom: "Chip padding bottom (px)",
+      chip_padding_left: "Chip padding left (px)",
+      chip_min_width: "Chip min width (px)",
+      chip_radius: "Chip radius (px)",
+      chip_gap: "Chip inner gap (px)",
+      chip_icon_size: "Chip icon (px)",
+      chip_text_size: "Chip text (px)",
+      indicator_gap: "Indicator gap (px)",
+      indicator_size: "Indicator size (px)",
+      indicator_radius: "Indicator radius (px)",
+      indicator_icon_size: "Indicator icon (px)",
+      name: "Name (optional)",
+      for_duration: "Must hold for (seconds)",
+      type: "Value type",
+      attribute: "Attribute (optional)",
+      aggregation: "Aggregation",
+      operator: "Operator",
+      value: "Value",
+      after: "After (HH:MM)",
+      before: "Before (HH:MM)",
+      inactive: "When inactive",
+      dim_opacity: "Dim opacity (0–1)",
+      animation: "Animation",
+      animation_speed: "Animation speed (x)",
+      tooltip: "Tooltip (supports {{state}}, {{value}}, {{attr.X}})",
+      size: "Indicator size (px)",
+      badge_text: "Badge text (supports {{state}}, {{value}}, {{attr.X}})",
+      badge_color: "Badge color",
+    };
+    return LABELS[schemaItem.name] || schemaItem.name;
+  }
+
+  _getStylingTitleSchema(styling) {
+    const px = (min, max) => ({ number: { mode: "box", min, max, step: 1 } });
+    if (!styling.show_title) {
+      return [{ name: "show_title", selector: { boolean: {} } }];
+    }
+    return [
+      { name: "show_title", selector: { boolean: {} } },
+      { type: "grid", name: "", schema: [
+        { name: "title", selector: { text: {} } },
+        { name: "title_font_size", selector: px(8, 80) },
+      ]},
+    ];
+  }
+
+  _getStylingIconSchema(styling) {
+    const px = (min, max) => ({ number: { mode: "box", min, max, step: 1 } });
+    if (!styling.show_icon) {
+      return [{ name: "show_icon", selector: { boolean: {} } }];
+    }
+    return [
+      { name: "show_icon", selector: { boolean: {} } },
+      { type: "grid", name: "", schema: [
+        { name: "icon_style", selector: { select: { mode: "dropdown", options: [
+          { value: "plain", label: "Plain (large, no background)" },
+          { value: "boxed", label: "Boxed (square, primary color)" },
+        ] } } },
+        { name: "icon_size", selector: px(12, 120) },
+      ]},
+      { name: "icon", selector: { icon: {} } },
+    ];
+  }
+
+  _getStylingChipsSchema() {
+    const px = (min, max) => ({ number: { mode: "box", min, max, step: 1 } });
+    return [
+      { type: "grid", name: "", schema: [
+        { name: "chips_margin", selector: px(0, 80) },
+        { name: "chips_gap", selector: px(0, 60) },
+      ]},
+      { type: "grid", name: "", schema: [
+        { name: "chip_padding_top", selector: px(0, 60) },
+        { name: "chip_padding_right", selector: px(0, 60) },
+        { name: "chip_padding_bottom", selector: px(0, 60) },
+        { name: "chip_padding_left", selector: px(0, 60) },
+      ]},
+      { type: "grid", name: "", schema: [
+        { name: "chip_min_width", selector: px(0, 400) },
+        { name: "chip_radius", selector: px(0, 999) },
+        { name: "chip_gap", selector: px(0, 40) },
+      ]},
+      { type: "grid", name: "", schema: [
+        { name: "chip_icon_size", selector: px(8, 80) },
+        { name: "chip_text_size", selector: px(8, 60) },
+      ]},
+    ];
+  }
+
+  _getStylingIndicatorsSchema() {
+    const px = (min, max) => ({ number: { mode: "box", min, max, step: 1 } });
+    return [
+      { type: "grid", name: "", schema: [
+        { name: "indicator_gap", selector: px(0, 40) },
+        { name: "indicator_size", selector: px(16, 120) },
+        { name: "indicator_radius", selector: px(0, 999) },
+        { name: "indicator_icon_size", selector: px(8, 80) },
+      ]},
+    ];
+  }
+
+  _getChipSchema(chip) {
+    const areaIds = getConfigAreaIds(this._config);
+    const candidateIds = this._hass && this._registry && areaIds.length
+      ? getChipCandidates(this._hass, this._registry, areaIds, chip.type)
+      : [];
+    const allIds = unique([...(chip.entity_ids || []), ...candidateIds]);
+    const schema = [
+      { name: "entity_ids", selector: { entity: { multiple: true, include_entities: allIds } } },
+      { name: "icon", selector: { icon: {} } },
+    ];
+    if (["lights", "music", "lux"].includes(chip.type)) {
+      schema.push({ name: "hidden_when_zero", selector: { boolean: {} } });
+    }
+    if (chip.type === "lights") {
+      schema.push({ name: "use_light_color", selector: { boolean: {} } });
+    }
+    return schema;
+  }
+
+  _getIndicatorCandidateIds() {
+    const areaIds = getConfigAreaIds(this._config);
+    if (!this._hass || !this._registry || !areaIds.length) return [];
+    return getIndicatorCandidates(this._hass, this._registry, areaIds);
+  }
+
+  // Returns the ha-form schema for a single rule node (state / numeric /
+  // time / group). The `rule.type` drives which fields show up so that
+  // changing the type rebuilds the form on the next render.
+  _getRuleSchema(rule, includeEntities) {
+    const RULE_TYPES = [
+      { value: "state",   label: "Text" },
+      { value: "numeric", label: "Number" },
+      { value: "time",    label: "Time of day" },
+      { value: "and",     label: "Group: all of (AND)" },
+      { value: "or",      label: "Group: any of (OR)" },
+      { value: "not",     label: "Group: NOT" },
+    ];
+    const schema = [
+      { name: "type", selector: { select: { mode: "dropdown", options: RULE_TYPES } } },
+    ];
+    if (rule.type === "state") {
+      schema.push(
+        { name: "entity_id", selector: { entity: { multiple: true, include_entities: includeEntities } } },
+        { name: "attribute", selector: { text: {} } },
+        { name: "aggregation", selector: { select: { mode: "dropdown", options: [
+          { value: "any",  label: "Any entity matches" },
+          { value: "all",  label: "All entities match" },
+          { value: "none", label: "No entity matches" },
+        ] } } },
+        { name: "operator", selector: { select: { mode: "dropdown", options: [
+          { value: "eq",       label: "Equals" },
+          { value: "ne",       label: "Not equals" },
+          { value: "in",       label: "Is one of (comma-sep)" },
+          { value: "not_in",   label: "Is not one of (comma-sep)" },
+          { value: "contains", label: "Contains" },
+          { value: "matches",  label: "Matches regex" },
+          { value: "truthy",   label: "Is truthy (on / open / …)" },
+          { value: "falsy",    label: "Is falsy (off / closed / …)" },
+        ] } } },
+        { name: "value", selector: { text: {} } },
+      );
+    } else if (rule.type === "numeric") {
+      schema.push(
+        { name: "entity_id", selector: { entity: { multiple: true, include_entities: includeEntities } } },
+        { name: "attribute", selector: { text: {} } },
+        { name: "aggregation", selector: { select: { mode: "dropdown", options: [
+          { value: "any",   label: "Any entity matches" },
+          { value: "all",   label: "All entities match" },
+          { value: "none",  label: "No entity matches" },
+          { value: "sum",   label: "Sum of all" },
+          { value: "avg",   label: "Average of all" },
+          { value: "min",   label: "Minimum" },
+          { value: "max",   label: "Maximum" },
+          { value: "count", label: "Count" },
+        ] } } },
+        { name: "operator", selector: { select: { mode: "dropdown", options: [
+          { value: "gt",  label: "Greater than" },
+          { value: "gte", label: "Greater or equal" },
+          { value: "lt",  label: "Less than" },
+          { value: "lte", label: "Less or equal" },
+          { value: "eq",  label: "Equals" },
+          { value: "ne",  label: "Not equals" },
+        ] } } },
+        { name: "value", selector: { number: { mode: "box", step: 0.1 } } },
+      );
+    } else if (rule.type === "time") {
+      schema.push(
+        { name: "after",  selector: { text: { type: "time" } } },
+        { name: "before", selector: { text: { type: "time" } } },
+      );
+    }
+    // Groups (and/or/not) are edited through their nested rules list,
+    // which is rendered separately; the schema for the parent group
+    // itself only carries the type selector.
+    return schema;
+  }
+
+  // Schema for a display_overrides entry condition (value type + entity
+  // + optional attribute + operator + value). Mirrors the rule schema but
+  // without aggregation / time / group options.
+  _getMapEntrySchema(type) {
+    const VALUE_TYPES = [
+      { value: "numeric", label: "Number" },
+      { value: "state",   label: "Text" },
+    ];
+    const schema = [
+      { name: "type", selector: { select: { mode: "dropdown", options: VALUE_TYPES } } },
+      { name: "entity_id", selector: { entity: {} } },
+      { name: "attribute", selector: { text: {} } },
+    ];
+    if (type === "numeric") {
+      schema.push(
+        { name: "operator", selector: { select: { mode: "dropdown", options: [
+          { value: "gt",  label: "Greater than" },
+          { value: "gte", label: "Greater or equal" },
+          { value: "lt",  label: "Less than" },
+          { value: "lte", label: "Less or equal" },
+          { value: "eq",  label: "Equals" },
+          { value: "ne",  label: "Not equals" },
+        ] } } },
+        { name: "value", selector: { number: { mode: "box", step: 0.1 } } },
+      );
+    } else {
+      schema.push(
+        { name: "operator", selector: { select: { mode: "dropdown", options: [
+          { value: "eq",       label: "Equals" },
+          { value: "ne",       label: "Not equals" },
+          { value: "in",       label: "Is one of (comma-sep)" },
+          { value: "not_in",   label: "Is not one of (comma-sep)" },
+          { value: "contains", label: "Contains" },
+          { value: "matches",  label: "Matches regex" },
+          { value: "truthy",   label: "Is truthy (on / open / …)" },
+          { value: "falsy",    label: "Is falsy (off / closed / …)" },
+        ] } } },
+        { name: "value", selector: { text: {} } },
+      );
+    }
+    return schema;
+  }
+
+  // Schema for a conditional display override — same fields as the base
+  // display but every field is optional (empty = use default). The
+  // "inactive" dropdown includes an empty option to mean "use default".
+  _getOverrideDisplaySchema() {
+    const px = (min, max) => ({ number: { mode: "box", min, max, step: 1 } });
+    return [
+      { type: "grid", name: "", schema: [
+        { name: "icon", selector: { icon: {} } },
+        { name: "inactive", selector: { select: { mode: "dropdown", options: [
+          { value: "",     label: "(default)" },
+          { value: "hide", label: "Hide when inactive" },
+          { value: "dim",  label: "Dim when inactive" },
+          { value: "show", label: "Always show" },
+        ] } } },
+      ]},
+      { type: "grid", name: "", schema: [
+        { name: "size",      selector: px(12, 120) },
+        { name: "icon_size", selector: px(8, 80) },
+        { name: "dim_opacity", selector: { number: { mode: "box", min: 0, max: 1, step: 0.05 } } },
+      ]},
+      { type: "grid", name: "", schema: [
+        { name: "animation", selector: { select: { mode: "dropdown", options: [
+          { value: "",       label: "(default)" },
+          { value: "none",   label: "None" },
+          { value: "pulse",  label: "Pulse" },
+          { value: "spin",   label: "Spin" },
+          { value: "blink",  label: "Blink" },
+          { value: "bounce", label: "Bounce" },
+          { value: "shake",  label: "Shake" },
+        ] } } },
+        { name: "animation_speed", selector: { number: { mode: "box", min: 0.25, max: 4, step: 0.05 } } },
+      ]},
+      { name: "tooltip", selector: { text: {} } },
+    ];
+  }
+
+  // Schema for the "Display" panel of an indicator.
+  _getIndicatorDisplaySchema() {
+    const px = (min, max) => ({ number: { mode: "box", min, max, step: 1 } });
+    return [
+      { type: "grid", name: "", schema: [
+        { name: "icon", selector: { icon: {} } },
+        { name: "inactive", selector: { select: { mode: "dropdown", options: [
+          { value: "hide", label: "Hide when inactive" },
+          { value: "dim",  label: "Dim when inactive" },
+          { value: "show", label: "Always show" },
+        ] } } },
+      ]},
+      { type: "grid", name: "", schema: [
+        { name: "size",      selector: px(12, 120) },
+        { name: "icon_size", selector: px(8, 80) },
+        { name: "dim_opacity", selector: { number: { mode: "box", min: 0, max: 1, step: 0.05 } } },
+      ]},
+      { type: "grid", name: "", schema: [
+        { name: "animation", selector: { select: { mode: "dropdown", options: [
+          { value: "none",   label: "None" },
+          { value: "pulse",  label: "Pulse" },
+          { value: "spin",   label: "Spin" },
+          { value: "blink",  label: "Blink" },
+          { value: "bounce", label: "Bounce" },
+          { value: "shake",  label: "Shake" },
+        ] } } },
+        { name: "animation_speed", selector: { number: { mode: "box", min: 0.25, max: 4, step: 0.05 } } },
+      ]},
+      { name: "tooltip", selector: { text: {} } },
+    ];
+  }
+
+  _getActionSchema(actionConfig) {
+    const action = actionConfig?.action || "none";
+    const schema = [
+      { name: "action", selector: { select: { mode: "dropdown", options: [
+        { value: "none", label: "None" },
+        { value: "more-info", label: "More info" },
+        { value: "navigate", label: "Navigate" },
+        { value: "url", label: "Open URL" },
+        { value: "toggle", label: "Toggle" },
+        { value: "call-service", label: "Call service" },
+        { value: "assist", label: "Assist" },
+      ] } } },
+    ];
+    if (["more-info", "toggle", "call-service"].includes(action)) {
+      schema.push({ name: "entity_id", selector: { entity: {} } });
+    }
+    if (action === "navigate") {
+      schema.push({ name: "navigation_path", selector: { text: {} } });
+    }
+    if (action === "url") {
+      schema.push({ name: "url_path", selector: { text: {} } });
+    }
+    if (action === "call-service") {
+      schema.push({ name: "service", selector: { text: {} } });
+      schema.push({ name: "service_data", selector: { object: {} } });
+    }
+    return schema;
+  }
+
+  _setupForm(id, data, schema, onChange) {
+    const form = this.shadowRoot.getElementById(id);
+    if (!form) return;
+    form.hass = this._hass;
+    form.data = data;
+    form.schema = schema;
+    form.computeLabel = (s) => this._computeLabel(s);
+    form.addEventListener("value-changed", (e) => {
+      if (this._suppressEvents) return;
+      e.stopPropagation();
+      onChange(e.detail.value);
+    });
+  }
+
+  // Returns an include_entities list for rule sub-editors: union of the
+  // entities already referenced by the indicator and the full hass-known
+  // entity list. If hass isn't available yet, falls back to the indicator's
+  // own entities.
+  _getIndicatorRuleCandidates(indicator) {
+    const own = collectIndicatorEntityIds(indicator);
+    if (!this._hass || !this._hass.states) return Array.from(own);
+    // Cache the full hass-entity id list, invalidated when entities are
+    // added/removed. Every `_setupRuleSubeditor` call would otherwise
+    // allocate a fresh Set + spread of Object.keys (often 1000+ ids).
+    const count = Object.keys(this._hass.states).length;
+    if (this._allEntityIdsCacheCount !== count) {
+      this._allEntityIdsCache = Object.keys(this._hass.states);
+      this._allEntityIdsCacheCount = count;
+    }
+    if (own.size === 0) return this._allEntityIdsCache;
+    // Merge own ids (may include ids not in hass.states, e.g. typos).
+    const all = this._allEntityIdsCache;
+    const extras = [];
+    for (const id of own) {
+      if (!this._hass.states[id]) extras.push(id);
+    }
+    return extras.length ? [...all, ...extras] : all;
+  }
+
+  // Wires one rule-sub-editor form. The caller passes the current rule;
+  // onChange receives the normalized new rule object. Handles type changes
+  // (e.g. state → numeric) by re-rendering so the schema updates.
+  _bindRuleForm(formId, rule, includeEntities, onChange) {
+    const form = this.shadowRoot.getElementById(formId);
+    if (!form) return;
+    const baseRule = rule || { type: "state" };
+    const schema = this._getRuleSchema(baseRule, includeEntities);
+    const firstEntity = toEntityList(baseRule.entity_id)[0] || "";
+    // Flat form shape: the ha-form works in flat keys, so we serialize a
+    // few rule fields into flat keys and round-trip them.
+    const formValue = {
+      type: baseRule.type || "state",
+      entity_id: toEntityList(baseRule.entity_id),
+      attribute: baseRule.attribute || "",
+      aggregation: baseRule.aggregation || "any",
+      operator: baseRule.operator || (baseRule.type === "numeric" ? "gt" : "eq"),
+      value: this._serializeRuleValue(baseRule),
+      after: baseRule.after || "",
+      before: baseRule.before || "",
+    };
+    form.hass = this._hass;
+    form.data = formValue;
+    form.schema = schema;
+    form.computeLabel = (s) => this._computeLabel(s);
+    form.addEventListener("value-changed", (e) => {
+      if (this._suppressEvents) return;
+      e.stopPropagation();
+      const data = e.detail.value;
+      const prevType = baseRule.type || "state";
+      const newType = data.type || prevType;
+      let newRule;
+      if (newType === "time") {
+        newRule = { type: "time", after: data.after || "", before: data.before || "" };
+      } else if (newType === "numeric") {
+        newRule = {
+          type: "numeric",
+          entity_id: toEntityList(data.entity_id),
+          attribute: data.attribute || null,
+          aggregation: data.aggregation || "any",
+          operator: data.operator || "gt",
+          value: parseNumber(data.value),
+          for: parseNumber(baseRule.for) ?? 0,
+        };
+      } else if (newType === "and" || newType === "or") {
+        newRule = { type: newType, rules: Array.isArray(baseRule.rules) ? baseRule.rules : [] };
+      } else if (newType === "not") {
+        newRule = { type: "not", rule: baseRule.rule || null };
+      } else {
+        newRule = {
+          type: "state",
+          entity_id: toEntityList(data.entity_id),
+          attribute: data.attribute || null,
+          aggregation: data.aggregation || "any",
+          operator: data.operator || "eq",
+          value: this._parseRuleValue(data.value, data.operator),
+          for: parseNumber(baseRule.for) ?? 0,
+        };
+      }
+      onChange(newRule);
+    });
+  }
+
+  // Serialize a rule's `value` into a text-field-friendly string. Arrays
+  // become comma-separated. Used for state rules where `in`/`not_in` carry
+  // list values.
+  _serializeRuleValue(rule) {
+    if (!rule) return "";
+    const v = rule.value;
+    if (Array.isArray(v)) return v.join(", ");
+    if (v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  // Parse a text-field value back into the shape the rule expects.
+  _parseRuleValue(raw, operator) {
+    if (raw === null || raw === undefined) return "";
+    const text = String(raw).trim();
+    if (!text) return "";
+    if (operator === "in" || operator === "not_in") {
+      return text.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    return text;
+  }
+
+  _setupColorPicker(id, currentValue, defaultColor, onChange) {
+    const picker = this.shadowRoot.getElementById(id);
+    if (!picker) return;
+    picker.value = currentValue || "";
+    if (defaultColor) {
+      picker.defaultColor = defaultColor;
+    }
+    picker.includeState = true;
+    picker.includeNone = true;
+    picker.addEventListener("value-changed", (e) => {
+      if (this._suppressEvents) return;
+      e.stopPropagation();
+      onChange(e.detail.value || "");
+    });
+  }
+
+  renderChipButtons() {
+    const areaIds = getConfigAreaIds(this._config);
+    if (!areaIds.length || !this._hass || !this._registry) {
+      return `<p class="secondary">Select an area to see available chip types.</p>`;
+    }
+    const available = Object.keys(CHIP_DEFINITIONS).filter(
+      (type) => !this._config.chips.some((chip) => chip.type === type)
+    );
+    if (!available.length) {
+      return `<p class="secondary">All chip types have been added.</p>`;
+    }
+    return available
+      .map((type) => `
+        <ha-button appearance="filled" size="small" data-action="add-chip" data-type="${htmlEscape(type)}">
+          <ha-icon icon="mdi:plus" slot="start"></ha-icon>
+          ${htmlEscape(CHIP_DEFINITIONS[type].label)}
+        </ha-button>
+      `)
+      .join("");
+  }
+
+  renderThresholdRows(chip, chipIndex) {
+    if (!["temperature", "humidity", "lux"].includes(chip.type)) {
+      return "";
+    }
+    return `
+      <div class="threshold-section">
+        <div class="threshold-header">
+          <span class="section-label">Threshold colors</span>
+          <ha-button appearance="filled" size="small" data-action="add-threshold" data-chip-index="${chipIndex}">
+            <ha-icon icon="mdi:plus" slot="start"></ha-icon>
+            Add row
+          </ha-button>
+        </div>
+        ${(chip.thresholds || []).map((threshold, thresholdIndex) => `
+          <div class="threshold-row">
+            <ha-textfield
+              label="Min value"
+              type="number"
+              data-kind="chip-threshold"
+              data-field="value"
+              data-chip-index="${chipIndex}"
+              data-threshold-index="${thresholdIndex}"
+              value="${htmlEscape(threshold.value)}"
+              step="0.1"
+            ></ha-textfield>
+            <ha-color-picker
+              id="chip-${chipIndex}-threshold-${thresholdIndex}-color"
+              label="Color"
+            ></ha-color-picker>
+            <ha-form
+              id="chip-${chipIndex}-threshold-${thresholdIndex}-icon"
+              class="threshold-icon-form"
+            ></ha-form>
+            <ha-icon-button
+              class="icon-button-danger"
+              label="Remove threshold"
+              data-action="remove-threshold"
+              data-chip-index="${chipIndex}"
+              data-threshold-index="${thresholdIndex}"
+              path="${MDI_PATH.delete}"
+            ></ha-icon-button>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  renderChipEditor(chip, chipIndex) {
+    const supportsCustomColor = (chip.type === "music") || (chip.type === "lights" && !chip.use_light_color);
+    const areaIds = getConfigAreaIds(this._config);
+    const candidateIds = this._hass && this._registry && areaIds.length
+      ? getChipCandidates(this._hass, this._registry, areaIds, chip.type)
+      : [];
+    const unselectedCount = candidateIds.filter((id) => !(chip.entity_ids || []).includes(id)).length;
+    return `
+      <ha-expansion-panel outlined>
+        <div slot="header" class="panel-header">
+          <div class="panel-heading">
+            <span class="panel-title">${htmlEscape(CHIP_DEFINITIONS[chip.type]?.label || chip.type)}</span>
+            <span class="secondary">${chip.entity_ids.length} ${chip.entity_ids.length === 1 ? "entity" : "entities"}</span>
+          </div>
+          ${this.renderChipPreview(chip)}
+        </div>
+        <div class="panel-content">
+          <div class="toolbar">
+            <ha-button appearance="filled" size="small" data-action="add-all-entities" data-chip-index="${chipIndex}" ${unselectedCount === 0 ? "disabled" : ""}>
+              <ha-icon icon="mdi:playlist-plus" slot="start"></ha-icon>
+              Add all entities${unselectedCount > 0 ? ` (${unselectedCount})` : ""}
+            </ha-button>
+            <span class="toolbar-spacer"></span>
+            <ha-icon-button
+              label="Move up"
+              data-action="move-chip-up"
+              data-chip-index="${chipIndex}"
+              ${chipIndex === 0 ? "disabled" : ""}
+              path="${MDI_PATH.arrowUp}"
+            ></ha-icon-button>
+            <ha-icon-button
+              label="Move down"
+              data-action="move-chip-down"
+              data-chip-index="${chipIndex}"
+              ${chipIndex === this._config.chips.length - 1 ? "disabled" : ""}
+              path="${MDI_PATH.arrowDown}"
+            ></ha-icon-button>
+            <ha-icon-button
+              class="icon-button-danger"
+              label="Remove chip"
+              data-action="remove-chip"
+              data-chip-index="${chipIndex}"
+              path="${MDI_PATH.delete}"
+            ></ha-icon-button>
+          </div>
+          <ha-form id="chip-${chipIndex}-form"></ha-form>
+          ${supportsCustomColor ? `
+            <ha-color-picker
+              id="chip-${chipIndex}-color"
+              label="Active color"
+            ></ha-color-picker>
+          ` : ""}
+          ${this.renderThresholdRows(chip, chipIndex)}
+          <div class="action-section">
+            <span class="section-label">Tap action</span>
+            <ha-form id="chip-${chipIndex}-tap-form"></ha-form>
+          </div>
+          <div class="action-section">
+            <span class="section-label">Hold action</span>
+            <ha-form id="chip-${chipIndex}-hold-form"></ha-form>
+          </div>
+        </div>
+      </ha-expansion-panel>
+    `;
+  }
+
+  renderIndicatorEditor(indicator, indicatorIndex) {
+    // Title: explicit name > first entity friendly name > "Indicator N".
+    const firstEntity = toEntityList(indicator.when?.entity_id)[0] || indicator.entity_id || "";
+    const displayTitle = indicator.name
+      || (firstEntity ? getEntityLabel(this._hass, firstEntity) : `Indicator ${indicatorIndex + 1}`);
+    const conditionCount = (indicator.and_if || []).length;
+    const iconHint = indicator.display?.icon || "mdi:circle";
+
+    const whenSection = this._renderRuleNodeEditor(`indicator-${indicatorIndex}-when`, indicator.when, {
+      heading: "When (trigger)",
+      path: `when`,
+    });
+    const andIfSection = (indicator.and_if || []).map((rule, ri) =>
+      this._renderRuleNodeEditor(`indicator-${indicatorIndex}-andif-${ri}`, rule, {
+        heading: `Condition ${ri + 1}`,
+        path: `and_if.${ri}`,
+        removable: true,
+        removeAction: "remove-indicator-condition",
+        removeData: { indicatorIndex, conditionIndex: ri },
+      })
+    ).join("");
+
+    const overridesMarkup = (indicator.display?.display_overrides || []).map((entry, oi) => `
+      <ha-expansion-panel outlined class="override-panel">
+        <div slot="header" class="override-header">
+          <span class="override-title">Override ${oi + 1}</span>
+          <ha-icon-button
+            class="icon-button-danger"
+            label="Remove override"
+            data-action="remove-display-override"
+            data-indicator-index="${indicatorIndex}"
+            data-entry-index="${oi}"
+            path="${MDI_PATH.delete}"
+          ></ha-icon-button>
+        </div>
+        <div class="override-content">
+          <span class="section-sublabel">Condition</span>
+          <ha-form id="indicator-${indicatorIndex}-override-${oi}-match-form"></ha-form>
+          <span class="section-sublabel">Display overrides (leave empty to use defaults)</span>
+          <ha-form id="indicator-${indicatorIndex}-override-${oi}-display-form"></ha-form>
+          <ha-color-picker
+            id="indicator-${indicatorIndex}-override-${oi}-color"
+            label="Color override"
+          ></ha-color-picker>
+          <ha-form id="indicator-${indicatorIndex}-override-${oi}-badge-form"></ha-form>
+          <ha-color-picker
+            id="indicator-${indicatorIndex}-override-${oi}-badge-color"
+            label="Badge color override"
+          ></ha-color-picker>
+        </div>
+      </ha-expansion-panel>
+    `).join("");
+
+    return `
+      <ha-expansion-panel outlined>
+        <div slot="header" class="panel-header">
+          <div class="panel-heading">
+            <span class="panel-title">
+              <ha-icon icon="${htmlEscape(iconHint)}"></ha-icon>
+              ${htmlEscape(displayTitle)}
+            </span>
+            <span class="secondary">
+              ${conditionCount ? `${conditionCount} extra condition${conditionCount === 1 ? "" : "s"}` : "No extra conditions"}
+            </span>
+          </div>
+          ${this.renderIndicatorPreview(indicator)}
+        </div>
+        <div class="panel-content">
+          ${this.renderIndicatorPreviewInline(indicator)}
+          <div class="toolbar">
+            <span class="toolbar-spacer"></span>
+            <ha-icon-button
+              label="Move up"
+              data-action="move-indicator-up"
+              data-indicator-index="${indicatorIndex}"
+              ${indicatorIndex === 0 ? "disabled" : ""}
+              path="${MDI_PATH.arrowUp}"
+            ></ha-icon-button>
+            <ha-icon-button
+              label="Move down"
+              data-action="move-indicator-down"
+              data-indicator-index="${indicatorIndex}"
+              ${indicatorIndex === this._config.activity_indicators.length - 1 ? "disabled" : ""}
+              path="${MDI_PATH.arrowDown}"
+            ></ha-icon-button>
+            <ha-icon-button
+              class="icon-button-danger"
+              label="Remove indicator"
+              data-action="remove-indicator"
+              data-indicator-index="${indicatorIndex}"
+              path="${MDI_PATH.delete}"
+            ></ha-icon-button>
+          </div>
+
+          <ha-form id="indicator-${indicatorIndex}-basic-form"></ha-form>
+
+          <div class="rule-section">
+            <span class="section-label">When</span>
+            <p class="secondary">The primary trigger — the indicator shows when this rule is true.</p>
+            ${whenSection}
+          </div>
+
+          <div class="rule-section">
+            <div class="threshold-header">
+              <span class="section-label">And if (optional)</span>
+              <ha-button appearance="filled" size="small" data-action="add-indicator-condition" data-indicator-index="${indicatorIndex}">
+                <ha-icon icon="mdi:plus" slot="start"></ha-icon>
+                Add condition
+              </ha-button>
+            </div>
+            <p class="secondary">Every extra condition must also be true for the indicator to show.</p>
+            ${andIfSection}
+          </div>
+
+          <div class="rule-section">
+            <span class="section-label">Display (defaults)</span>
+            <ha-form id="indicator-${indicatorIndex}-display-form"></ha-form>
+            <ha-color-picker
+              id="indicator-${indicatorIndex}-color"
+              label="Base color"
+            ></ha-color-picker>
+            <ha-form id="indicator-${indicatorIndex}-badge-form"></ha-form>
+            <ha-color-picker
+              id="indicator-${indicatorIndex}-badge-color"
+              label="Badge color"
+            ></ha-color-picker>
+          </div>
+
+          <div class="rule-section">
+            <div class="threshold-header">
+              <span class="section-label">Conditional display (optional)</span>
+              <ha-button appearance="filled" size="small" data-action="add-display-override" data-indicator-index="${indicatorIndex}">
+                <ha-icon icon="mdi:plus" slot="start"></ha-icon>
+                Add override
+              </ha-button>
+            </div>
+            <p class="secondary">Override any display property when a condition matches. First match wins. Empty fields fall back to the defaults above.</p>
+            ${overridesMarkup}
+          </div>
+
+          <div class="action-section">
+            <span class="section-label">Tap action</span>
+            <ha-form id="indicator-${indicatorIndex}-tap-form"></ha-form>
+          </div>
+          <div class="action-section">
+            <span class="section-label">Hold action</span>
+            <ha-form id="indicator-${indicatorIndex}-hold-form"></ha-form>
+          </div>
+        </div>
+      </ha-expansion-panel>
+    `;
+  }
+
+  // Renders a single rule-node editor (used by When and by each And-if
+  // condition). Produces the DOM skeleton — bindings are attached
+  // separately in the render() pass.
+  _renderRuleNodeEditor(id, rule, opts) {
+    const removeBtn = opts && opts.removable ? `
+      <ha-icon-button
+        class="icon-button-danger"
+        label="Remove"
+        data-action="${htmlEscape(opts.removeAction)}"
+        data-indicator-index="${opts.removeData.indicatorIndex}"
+        data-condition-index="${opts.removeData.conditionIndex}"
+        path="${MDI_PATH.delete}"
+      ></ha-icon-button>
+    ` : "";
+    // Group rules (and/or/not) need their own nested editors; we show a
+    // hint for now so the card never silently drops them. Users who want
+    // the full power of nested groups can still edit via YAML.
+    const isGroup = rule && (rule.type === "and" || rule.type === "or" || rule.type === "not");
+    const groupHint = isGroup
+      ? `<p class="secondary">Nested group — edit child rules via YAML for now.</p>`
+      : "";
+    return `
+      <div class="rule-row">
+        <div class="rule-row-header">
+          <span class="section-sublabel">${htmlEscape(opts?.heading || "Rule")}</span>
+          ${removeBtn}
+        </div>
+        <ha-form id="${htmlEscape(id)}-form"></ha-form>
+        ${groupHint}
+      </div>
+    `;
+  }
+
+  // Coalesce multiple synchronous render() calls (setConfig + several
+  // form-change handlers in the same tick) into a single DOM rebuild via
+  // requestAnimationFrame. Keeps the editor responsive under rapid
+  // interaction without the ping-pong of repeated innerHTML rewrites.
+  render() {
+    if (!this.shadowRoot || this._rendering) return;
+    if (this._renderRAF) return;
+    this._renderRAF = requestAnimationFrame(() => {
+      this._renderRAF = null;
+      this._doRender();
+    });
+  }
+
+  _doRender() {
+    if (!this.shadowRoot || this._rendering) {
+      return;
+    }
+    this._rendering = true;
+
+    // Preserve focus + selection across the innerHTML rebuild so typing
+    // in an override / badge / tooltip input doesn't blur and scroll the
+    // modal on every keystroke-triggered re-render.
+    const focusInfo = this._saveFocus();
+
+    const expandedPanels = new Set();
+    this.shadowRoot.querySelectorAll("ha-expansion-panel").forEach((panel, index) => {
+      if (panel.expanded) {
+        expandedPanels.add(index);
+      }
+    });
+
+    const selectedAreaIds = getConfigAreaIds(this._config);
+    const areaSelected = selectedAreaIds.length > 0;
+    // Each slot is rendered as its own <ha-form> area selector so the user
+    // can swap the value any time. When no area is selected yet we still show
+    // one empty slot so the user has somewhere to pick an area. When the
+    // "Add area" button was clicked we append an extra empty slot.
+    const areaSlots = selectedAreaIds.length === 0
+      ? [""]
+      : (this._addingArea ? [...selectedAreaIds, ""] : [...selectedAreaIds]);
+    const showAddButton = areaSelected && !this._addingArea;
+    const indicatorCandidateIds = this.getIndicatorAddCandidateIds();
+
+    const areaRowsMarkup = areaSlots.map((value, index) => {
+      const showRemove = areaSlots.length > 1;
+      return `
+        <div class="area-row">
+          <ha-form id="area-form-${index}" class="area-row-form"></ha-form>
+          ${showRemove ? `
+            <ha-icon-button
+              class="icon-button-danger"
+              label="Remove area"
+              data-action="remove-area"
+              data-area-index="${index}"
+              path="${MDI_PATH.delete}"
+            ></ha-icon-button>
+          ` : ""}
+        </div>
+      `;
+    }).join("");
+
+    this.shadowRoot.innerHTML = `
+      <style>${this.styles()}</style>
+      <div class="card-config">
+        <div class="area-list">${areaRowsMarkup}</div>
+        ${showAddButton ? `
+          <div class="area-add-row">
+            <ha-button appearance="filled" size="small" data-action="show-add-area">
+              <ha-icon icon="mdi:plus" slot="start"></ha-icon>
+              Add area
+            </ha-button>
+          </div>
+        ` : ""}
+        <p class="secondary">
+          ${this._registryLoaded
+            ? (areaSelected
+                ? "The card automatically uses the first area icon and joins all area names with “+”. Override either via Advanced styling."
+                : "Choose an area first. The remaining settings will appear after selection.")
+            : "Loading the Home Assistant area registry\u2026"}
+        </p>
+
+        ${areaSelected ? `
+          <ha-expansion-panel outlined>
+            <div slot="header" class="panel-header">
+              <div class="panel-heading">
+                <span class="panel-title">Card actions</span>
+                <span class="secondary">Tap &amp; hold actions for the whole card</span>
+              </div>
+            </div>
+            <div class="panel-content">
+              <div class="action-section">
+                <span class="section-label">Tap action</span>
+                <ha-form id="card-tap-form"></ha-form>
+              </div>
+              <div class="action-section">
+                <span class="section-label">Hold action</span>
+                <ha-form id="card-hold-form"></ha-form>
+              </div>
+            </div>
+          </ha-expansion-panel>
+
+          <ha-expansion-panel outlined>
+            <div slot="header" class="panel-header">
+              <div class="panel-heading">
+                <span class="panel-title">Advanced styling</span>
+                <span class="secondary">Customize sizes, colors and spacing</span>
+              </div>
+            </div>
+            <div class="panel-content">
+              <p class="secondary">Leave a value empty to use the built-in default.</p>
+
+              <ha-form id="styling-title-form"></ha-form>
+              ${this._config.styling.show_title ? `
+                <ha-color-picker id="styling-title-color" label="Title color"></ha-color-picker>
+              ` : ""}
+
+              <ha-form id="styling-icon-form"></ha-form>
+              ${this._config.styling.show_icon ? `
+                <ha-color-picker id="styling-icon-color" label="Icon color"></ha-color-picker>
+              ` : ""}
+
+              <div class="styling-group">
+                <span class="section-label">Chips</span>
+              </div>
+              <ha-form id="styling-chips-form"></ha-form>
+
+              <div class="styling-group">
+                <span class="section-label">Activity indicators</span>
+              </div>
+              <ha-form id="styling-indicators-form"></ha-form>
+            </div>
+          </ha-expansion-panel>
+
+          <div class="section-header">
+            <span class="section-label">Chips</span>
+            <div class="button-row">${this.renderChipButtons()}</div>
+          </div>
+          <p class="secondary">Chip order controls the visual order on the card. Each chip type can be added once.</p>
+        ` : ""}
+
+        ${areaSelected ? (this._config.chips || []).map((chip, i) => this.renderChipEditor(chip, i)).join("") : ""}
+
+        ${areaSelected ? `
+          <div class="section-header">
+            <span class="section-label">Activity Indicators</span>
+          </div>
+          <p class="secondary">Pick an entity to add it as an activity indicator. The editor auto-detects a role, which you can adjust afterward.</p>
+        ` : ""}
+
+        ${areaSelected ? (this._config.activity_indicators || []).map((ind, i) => this.renderIndicatorEditor(ind, i)).join("") : ""}
+
+        ${areaSelected ? `
+          <div class="add-indicator-row">
+            <ha-form id="add-indicator-form"></ha-form>
+            <label class="show-all-toggle" data-action="toggle-indicator-show-all">
+              <input type="checkbox" ${this._indicatorShowAll ? "checked" : ""} />
+              Show all entities
+            </label>
+          </div>
+        ` : ""}
+      </div>
+    `;
+
+    // Listeners are bound once in connectedCallback — no need to
+    // remove/re-add on every render.
+
+    this._suppressEvents = true;
+
+    areaSlots.forEach((value, index) => {
+      this._setupForm(`area-form-${index}`, { area: value || "" }, [
+        { name: "area", selector: { area: {} } },
+      ], (data) => {
+        this.handleAreaSlotChange(index, data.area || "");
+      });
+    });
+
+    if (areaSelected) {
+      const applyStylingNumericData = (data) => {
+        for (const key of STYLING_NUMERIC_KEYS) {
+          if (key in data) this._config.styling[key] = parseNumber(data[key]);
+        }
+      };
+
+      // Title group: show/hide toggle + title text + title size.
+      this._setupForm("styling-title-form",
+        {
+          show_title: this._config.styling.show_title !== false,
+          title: this._config.title || "",
+          title_font_size: this._config.styling.title_font_size,
+        },
+        this._getStylingTitleSchema(this._config.styling),
+        (data) => {
+          const prevShowTitle = this._config.styling.show_title;
+          if ("show_title" in data) this._config.styling.show_title = data.show_title !== false;
+          if ("title" in data) this._config.title = data.title || "";
+          applyStylingNumericData(data);
+          this.emitConfig();
+          if (prevShowTitle !== this._config.styling.show_title) this.render();
+        },
+      );
+
+      if (this._config.styling.show_title) {
+        this._setupColorPicker("styling-title-color", this._config.styling.title_color, "", (value) => {
+          this._config.styling.title_color = value;
+          this.emitConfig();
+        });
+      }
+
+      // Icon group: show/hide toggle + style + size + icon override.
+      this._setupForm("styling-icon-form",
+        {
+          show_icon: this._config.styling.show_icon !== false,
+          icon_style: this._config.icon_style || "plain",
+          icon_size: this._config.styling.icon_size,
+          icon: this._config.icon || "",
+        },
+        this._getStylingIconSchema(this._config.styling),
+        (data) => {
+          const prevShowIcon = this._config.styling.show_icon;
+          if ("show_icon" in data) this._config.styling.show_icon = data.show_icon !== false;
+          if ("icon_style" in data) this._config.icon_style = data.icon_style || "plain";
+          if ("icon" in data) this._config.icon = data.icon || "";
+          applyStylingNumericData(data);
+          this.emitConfig();
+          if (prevShowIcon !== this._config.styling.show_icon) this.render();
+        },
+      );
+
+      if (this._config.styling.show_icon) {
+        this._setupColorPicker("styling-icon-color", this._config.styling.icon_color, "", (value) => {
+          this._config.styling.icon_color = value;
+          this.emitConfig();
+        });
+      }
+
+      // Chips styling group.
+      this._setupForm("styling-chips-form",
+        { ...this._config.styling },
+        this._getStylingChipsSchema(),
+        (data) => {
+          applyStylingNumericData(data);
+          this.emitConfig();
+        },
+      );
+
+      // Activity indicators styling group.
+      this._setupForm("styling-indicators-form",
+        { ...this._config.styling },
+        this._getStylingIndicatorsSchema(),
+        (data) => {
+          applyStylingNumericData(data);
+          this.emitConfig();
+        },
+      );
+
+      this._setupForm("card-tap-form",
+        this._config.tap_action || { action: "none" },
+        this._getActionSchema(this._config.tap_action),
+        (data) => {
+          const prev = this._config.tap_action?.action;
+          this._config.tap_action = { ...this._config.tap_action, ...data };
+          this.emitConfig();
+          if (prev !== data.action) this.render();
+        },
+      );
+
+      this._setupForm("card-hold-form",
+        this._config.hold_action || { action: "none" },
+        this._getActionSchema(this._config.hold_action),
+        (data) => {
+          const prev = this._config.hold_action?.action;
+          this._config.hold_action = { ...this._config.hold_action, ...data };
+          this.emitConfig();
+          if (prev !== data.action) this.render();
+        },
+      );
+
+      this._config.chips.forEach((chip, i) => {
+        this._setupForm(`chip-${i}-form`, chip, this._getChipSchema(chip), (data) => {
+          const prevUseLightColor = this._config.chips[i].use_light_color;
+          Object.assign(this._config.chips[i], data);
+          this.emitConfig();
+          // Re-render when the toggle flips so the color picker appears/disappears.
+          if (data.use_light_color !== undefined && data.use_light_color !== prevUseLightColor) this.render();
+        });
+        if ((chip.type === "music") || (chip.type === "lights" && !chip.use_light_color)) {
+          const def = CHIP_DEFINITIONS[chip.type]?.activeColor || "#43b581";
+          this._setupColorPicker(`chip-${i}-color`, chip.active_color, def, (value) => {
+            this._config.chips[i].active_color = value;
+            this.emitConfig();
+          });
+        }
+        if (Array.isArray(chip.thresholds)) {
+          chip.thresholds.forEach((threshold, ti) => {
+            this._setupColorPicker(
+              `chip-${i}-threshold-${ti}-color`,
+              threshold.color,
+              "#43b581",
+              (value) => {
+                this._config.chips[i].thresholds[ti].color = value;
+                this.emitConfig();
+              },
+            );
+            this._setupForm(
+              `chip-${i}-threshold-${ti}-icon`,
+              { icon: threshold.icon || "" },
+              [{ name: "icon", selector: { icon: {} } }],
+              (data) => {
+                this._config.chips[i].thresholds[ti].icon = data.icon || "";
+                this.emitConfig();
+              },
+            );
+          });
+        }
+        this._setupForm(`chip-${i}-tap-form`, chip.tap_action || { action: "none" }, this._getActionSchema(chip.tap_action), (data) => {
+          const prev = this._config.chips[i].tap_action?.action;
+          this._config.chips[i].tap_action = { ...this._config.chips[i].tap_action, ...data };
+          this.emitConfig();
+          if (prev !== data.action) this.render();
+        });
+        this._setupForm(`chip-${i}-hold-form`, chip.hold_action || { action: "none" }, this._getActionSchema(chip.hold_action), (data) => {
+          const prev = this._config.chips[i].hold_action?.action;
+          this._config.chips[i].hold_action = { ...this._config.chips[i].hold_action, ...data };
+          this.emitConfig();
+          if (prev !== data.action) this.render();
+        });
+      });
+
+      const addIndicatorSchema = this._indicatorShowAll
+        ? [{ name: "add_entity", selector: { entity: {} } }]
+        : [{ name: "add_entity", selector: { entity: { include_entities: indicatorCandidateIds } } }];
+      this._setupForm("add-indicator-form",
+        { add_entity: "" },
+        addIndicatorSchema,
+        (data) => {
+          const entityId = data.add_entity || "";
+          if (!entityId) return;
+          if (!this._hass?.states?.[entityId]) return;
+          const alreadyUsed = this._config.activity_indicators.some((ind) =>
+            toEntityList(ind.when?.entity_id).includes(entityId)
+          );
+          if (alreadyUsed) return;
+          const stateObj = this._hass.states[entityId];
+          const defaults = getIndicatorDefaults(entityId, stateObj);
+          const newIndicator = normalizeIndicator({
+            name: "",
+            when: defaults.when,
+            and_if: [],
+            display: defaults.display,
+            tap_action: { action: "more-info", entity_id: entityId },
+            hold_action: { action: "none" },
+            for_duration: 0,
+            role: detectIndicatorRole(entityId, stateObj) || "movement",
+            entity_id: entityId,
+          });
+          this._config.activity_indicators = [
+            ...this._config.activity_indicators,
+            newIndicator,
+          ];
+          this.emitConfig();
+          this.render();
+        },
+      );
+
+      this._config.activity_indicators.forEach((indicator, i) => {
+        // Union of all entities referenced by this indicator's rules, plus
+        // all hass-known entity_ids as fallback. Used for entity selectors
+        // inside rule sub-editors so users aren't limited to already-chosen
+        // entities.
+        const ruleCandidates = this._getIndicatorRuleCandidates(indicator);
+
+        // Basic: name + for_duration.
+        this._setupForm(`indicator-${i}-basic-form`,
+          {
+            name: indicator.name || "",
+            for_duration: parseNumber(indicator.for_duration) ?? 0,
+          },
+          [
+            { name: "name", selector: { text: {} } },
+            { name: "for_duration", selector: { number: { mode: "box", min: 0, max: 86400, step: 1 } } },
+          ],
+          (data) => {
+            this._config.activity_indicators[i].name = data.name || "";
+            this._config.activity_indicators[i].for_duration = parseNumber(data.for_duration) ?? 0;
+            this.emitConfig();
+          },
+        );
+
+        // When: rule node editor.
+        {
+          const prevType = (indicator.when?.type) || "state";
+          this._bindRuleForm(`indicator-${i}-when-form`, indicator.when, ruleCandidates, (newRule) => {
+            this._config.activity_indicators[i].when = newRule;
+            this.emitConfig();
+            if (newRule.type !== prevType) this.render();
+          });
+        }
+
+        // And-if: one form per condition.
+        (indicator.and_if || []).forEach((condRule, ri) => {
+          const prevType = (condRule?.type) || "state";
+          this._bindRuleForm(`indicator-${i}-andif-${ri}-form`, condRule, ruleCandidates, (newRule) => {
+            this._config.activity_indicators[i].and_if[ri] = newRule;
+            this.emitConfig();
+            if (newRule.type !== prevType) this.render();
+          });
+        });
+
+        // Display: icon/inactive/size/anim/tooltip.
+        const display = indicator.display || {};
+        this._setupForm(`indicator-${i}-display-form`,
+          {
+            icon: display.icon || "",
+            inactive: display.inactive || "hide",
+            size: parseNumber(display.size) ?? "",
+            icon_size: parseNumber(display.icon_size) ?? "",
+            dim_opacity: parseNumber(display.dim_opacity) ?? 0.3,
+            animation: display.animation || "none",
+            animation_speed: parseNumber(display.animation_speed) ?? 1,
+            tooltip: display.tooltip || "",
+          },
+          this._getIndicatorDisplaySchema(),
+          (data) => {
+            const d = this._config.activity_indicators[i].display || {};
+            d.icon = data.icon || "";
+            d.inactive = data.inactive || "hide";
+            d.size = parseNumber(data.size);
+            d.icon_size = parseNumber(data.icon_size);
+            d.dim_opacity = parseNumber(data.dim_opacity) ?? 0.3;
+            d.animation = data.animation || "none";
+            d.animation_speed = parseNumber(data.animation_speed) ?? 1;
+            d.tooltip = data.tooltip || null;
+            this._config.activity_indicators[i].display = d;
+            this.emitConfig();
+          },
+        );
+
+        this._setupColorPicker(`indicator-${i}-color`, display.color, "#43b581", (value) => {
+          this._config.activity_indicators[i].display.color = value;
+          this.emitConfig();
+        });
+
+        // Conditional display overrides.
+        (display.display_overrides || []).forEach((entry, oi) => {
+          // Match condition form.
+          const matchType = entry.match?.type || "numeric";
+          const matchSchema = this._getMapEntrySchema(matchType);
+          const prevMatchType = matchType;
+          this._setupForm(`indicator-${i}-override-${oi}-match-form`,
+            {
+              type: matchType,
+              entity_id: entry.match?.entity_id || "",
+              attribute: entry.match?.attribute || "",
+              operator: entry.match?.operator || (matchType === "numeric" ? "gt" : "eq"),
+              value: entry.match?.value ?? "",
+            },
+            matchSchema,
+            (data) => {
+              const e = this._config.activity_indicators[i].display.display_overrides[oi];
+              if (!e) return;
+              const m = e.match = e.match || {};
+              m.type = data.type || "numeric";
+              m.operator = data.operator || "gt";
+              // Only set optional keys when they have values, so shape stays
+              // identical after normalizeDisplay strips empty/missing fields.
+              if (data.entity_id) m.entity_id = data.entity_id; else delete m.entity_id;
+              if (data.attribute) m.attribute = data.attribute; else delete m.attribute;
+              const numeric = parseNumber(data.value);
+              m.value = numeric !== null && String(numeric) === String(data.value).trim()
+                ? numeric
+                : data.value;
+              this.emitConfig();
+              if (data.type !== prevMatchType) this.render();
+            },
+          );
+          // Display override fields.
+          this._setupForm(`indicator-${i}-override-${oi}-display-form`,
+            {
+              icon: entry.icon || "",
+              inactive: entry.inactive || "",
+              size: entry.size != null ? entry.size : "",
+              icon_size: entry.icon_size != null ? entry.icon_size : "",
+              dim_opacity: entry.dim_opacity != null ? entry.dim_opacity : "",
+              animation: entry.animation || "",
+              animation_speed: entry.animation_speed != null ? entry.animation_speed : "",
+              tooltip: entry.tooltip || "",
+            },
+            this._getOverrideDisplaySchema(),
+            (data) => {
+              const e = this._config.activity_indicators[i].display.display_overrides[oi];
+              if (!e) return;
+              // Only persist meaningful values; delete empty/null keys so the
+              // config stays in sync with normalizeDisplay's output (which
+              // strips unset fields). Keeping this shape-stable prevents the
+              // bounced-back config from differing and triggering a re-render
+              // that would kill focus mid-typing.
+              const setOrDelete = (key, value) => {
+                if (value === null || value === undefined || value === "") delete e[key];
+                else e[key] = value;
+              };
+              setOrDelete("icon", data.icon || "");
+              setOrDelete("inactive", data.inactive || "");
+              setOrDelete("size", parseNumber(data.size));
+              setOrDelete("icon_size", parseNumber(data.icon_size));
+              setOrDelete("dim_opacity", parseNumber(data.dim_opacity));
+              setOrDelete("animation", data.animation || "");
+              setOrDelete("animation_speed", parseNumber(data.animation_speed));
+              setOrDelete("tooltip", data.tooltip || "");
+              this.emitConfig();
+            },
+          );
+          // Color override picker.
+          this._setupColorPicker(`indicator-${i}-override-${oi}-color`, entry.color || "", "", (value) => {
+            const e = this._config.activity_indicators[i].display.display_overrides[oi];
+            if (!e) return;
+            if (value) e.color = value;
+            else delete e.color;
+            this.emitConfig();
+          });
+          // Badge override.
+          const oBadge = entry.badge || { text: "", color: "" };
+          this._setupForm(`indicator-${i}-override-${oi}-badge-form`,
+            { badge_text: oBadge.text || "" },
+            [{ name: "badge_text", selector: { text: {} } }],
+            (data) => {
+              const e = this._config.activity_indicators[i].display.display_overrides[oi];
+              if (!e) return;
+              const text = (data.badge_text || "").trim();
+              const color = e.badge?.color || "";
+              e.badge = (text || color) ? { text, color } : null;
+              this.emitConfig();
+            },
+          );
+          this._setupColorPicker(`indicator-${i}-override-${oi}-badge-color`, oBadge.color || "", "", (value) => {
+            const e = this._config.activity_indicators[i].display.display_overrides[oi];
+            if (!e) return;
+            const text = e.badge?.text || "";
+            e.badge = (text || value) ? { text, color: value } : null;
+            this.emitConfig();
+          });
+        });
+
+        // Badge (optional).
+        const badge = display.badge || { text: "", color: "" };
+        this._setupForm(`indicator-${i}-badge-form`,
+          { badge_text: badge.text || "" },
+          [
+            { name: "badge_text", selector: { text: {} } },
+          ],
+          (data) => {
+            const text = (data.badge_text || "").trim();
+            const color = this._config.activity_indicators[i].display.badge?.color || "";
+            this._config.activity_indicators[i].display.badge = (text || color)
+              ? { text, color }
+              : null;
+            this.emitConfig();
+          },
+        );
+        this._setupColorPicker(`indicator-${i}-badge-color`, badge.color, "", (value) => {
+          const d = this._config.activity_indicators[i].display;
+          const text = d.badge?.text || "";
+          d.badge = (text || value) ? { text, color: value } : null;
+          this.emitConfig();
+        });
+
+        this._setupForm(`indicator-${i}-tap-form`, indicator.tap_action || { action: "none" }, this._getActionSchema(indicator.tap_action), (data) => {
+          const prev = this._config.activity_indicators[i].tap_action?.action;
+          this._config.activity_indicators[i].tap_action = { ...this._config.activity_indicators[i].tap_action, ...data };
+          this.emitConfig();
+          if (prev !== data.action) this.render();
+        });
+        this._setupForm(`indicator-${i}-hold-form`, indicator.hold_action || { action: "none" }, this._getActionSchema(indicator.hold_action), (data) => {
+          const prev = this._config.activity_indicators[i].hold_action?.action;
+          this._config.activity_indicators[i].hold_action = { ...this._config.activity_indicators[i].hold_action, ...data };
+          this.emitConfig();
+          if (prev !== data.action) this.render();
+        });
+      });
+    }
+
+    this._suppressEvents = false;
+
+    this.shadowRoot.querySelectorAll("ha-expansion-panel").forEach((panel, index) => {
+      if (expandedPanels.has(index)) {
+        panel.expanded = true;
+      }
+    });
+
+    this._rendering = false;
+    this._restoreFocus(focusInfo);
+  }
+
+  // Best-effort capture of the currently focused input inside this
+  // editor's shadow tree. We record the id of the nearest ancestor
+  // element in our shadow root (usually an `<ha-form id="...">`) plus
+  // the field name inside the form and the text-selection range, so the
+  // rebuilt DOM can re-focus the equivalent input.
+  _saveFocus() {
+    const info = { formId: null, fieldName: null, selStart: null, selEnd: null };
+    try {
+      let el = document.activeElement;
+      const seen = new Set();
+      while (el?.shadowRoot?.activeElement && !seen.has(el)) {
+        seen.add(el);
+        el = el.shadowRoot.activeElement;
+      }
+      if (!el) return info;
+      if ("selectionStart" in el) {
+        info.selStart = el.selectionStart;
+        info.selEnd = el.selectionEnd;
+      }
+      // Walk up through shadow hosts to find the nearest element in our
+      // own shadow root that carries an id (forms are the usual anchor).
+      let node = el;
+      while (node) {
+        if (node.getAttribute && !info.fieldName) {
+          const name = node.getAttribute("name");
+          if (name) info.fieldName = name;
+        }
+        const root = node.getRootNode && node.getRootNode();
+        if (root === this.shadowRoot && node.id) {
+          info.formId = node.id;
+          break;
+        }
+        node = node.parentNode || (root && root.host) || null;
+      }
+    } catch (_) { /* ignore — focus is best-effort */ }
+    return info;
+  }
+
+  _restoreFocus(info) {
+    if (!info?.formId) return;
+    // Defer a frame so ha-form has mounted its internal inputs.
+    requestAnimationFrame(() => {
+      try {
+        const form = this.shadowRoot.getElementById(info.formId);
+        if (!form) return;
+        const byName = info.fieldName
+          ? form.shadowRoot?.querySelector?.(`[name="${info.fieldName}"]`)
+          : null;
+        const target = byName
+          || form.shadowRoot?.querySelector?.("input, textarea, ha-textfield, ha-select")
+          || null;
+        if (!target) return;
+        if (typeof target.focus === "function") target.focus();
+        const inner = ("selectionStart" in target)
+          ? target
+          : target.shadowRoot?.querySelector?.("input, textarea");
+        if (inner && info.selStart != null && "setSelectionRange" in inner) {
+          try { inner.setSelectionRange(info.selStart, info.selEnd); } catch (_) {}
+        }
+      } catch (_) { /* ignore */ }
+    });
+  }
+
+  styles() {
+    if (AdvancedAreaCardEditor._stylesCache) return AdvancedAreaCardEditor._stylesCache;
+    const css = `
+      :host {
+        display: block;
+        color: var(--primary-text-color);
+      }
+      .card-config {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .area-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .area-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .area-row-form {
+        flex: 1;
+        min-width: 0;
+      }
+      .area-row .icon-button-danger {
+        color: var(--error-color, #ef5350);
+        flex-shrink: 0;
+      }
+      .area-add-row {
+        display: flex;
+        justify-content: flex-start;
+      }
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+      }
+      .section-label {
+        font-size: 1rem;
+        font-weight: 500;
+        color: var(--primary-text-color);
+      }
+      .secondary {
+        color: var(--secondary-text-color);
+        font-size: 0.875rem;
+        margin: 0;
+      }
+      ha-expansion-panel {
+        --expansion-panel-summary-padding: 12px 16px;
+        --expansion-panel-content-padding: 0;
+        display: block;
+      }
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        width: 100%;
+        padding: 4px 0;
+      }
+      .panel-heading {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .panel-title {
+        font-size: 1rem;
+        font-weight: 500;
+        color: var(--primary-text-color);
+      }
+      .panel-content {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        padding: 16px;
+        padding-top: 20px;
+        border-top: 1px solid var(--divider-color);
+      }
+      .chip-preview {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 18px;
+        padding: 4px 10px;
+        background: var(--secondary-background-color);
+        font-size: 0.85rem;
+        font-weight: 500;
+      }
+      .chip-preview ha-icon {
+        --mdc-icon-size: 18px;
+      }
+      .chip-preview-active {
+        color: var(--primary-text-color);
+      }
+      .chip-preview-inactive {
+        color: var(--disabled-text-color, var(--secondary-text-color));
+      }
+
+      /* Indicator preview — mirrors the runtime indicator styling so
+         users see exactly what will render on the card. Self-contained
+         because the editor lives in its own shadow DOM. */
+      .indicator-preview-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .indicator-preview {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--aac-indicator-size, 32px);
+        height: var(--aac-indicator-size, 32px);
+        border-radius: var(--aac-indicator-radius, 999px);
+        background: color-mix(in srgb, var(--indicator-color) 18%, var(--secondary-background-color));
+        color: var(--indicator-color);
+        --mdc-icon-size: var(--aac-indicator-icon-size, 16px);
+        transition: opacity 180ms ease;
+      }
+      .indicator-preview.indicator--dim {
+        opacity: var(--aac-indicator-dim-opacity, 0.3);
+      }
+      .indicator-preview .indicator__badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        min-width: 14px;
+        height: 14px;
+        padding: 0 4px;
+        border-radius: 999px;
+        background: var(--indicator-color);
+        color: white;
+        font-size: 10px;
+        line-height: 14px;
+        text-align: center;
+      }
+      .indicator-preview.indicator--anim-spin .indicator-icon {
+        animation: aac-spin var(--aac-indicator-anim-duration, 2.4s) linear infinite;
+      }
+      .indicator-preview.indicator--anim-pulse {
+        animation: aac-pulse var(--aac-indicator-anim-duration, 2.4s) ease-in-out infinite;
+      }
+      .indicator-preview.indicator--anim-blink {
+        animation: aac-blink var(--aac-indicator-anim-duration, 2.4s) steps(2, start) infinite;
+      }
+      .indicator-preview.indicator--anim-bounce {
+        animation: aac-bounce var(--aac-indicator-anim-duration, 2.4s) ease-in-out infinite;
+      }
+      .indicator-preview.indicator--anim-shake .indicator-icon {
+        animation: aac-shake var(--aac-indicator-anim-duration, 2.4s) ease-in-out infinite;
+      }
+      @keyframes aac-spin  { to { transform: rotate(360deg); } }
+      @keyframes aac-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+      @keyframes aac-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+      @keyframes aac-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+      @keyframes aac-shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+      .indicator-status-pill {
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 999px;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+      }
+      .indicator-status-pill.status-active {
+        background: color-mix(in srgb, var(--success-color, #43b581) 22%, transparent);
+        color: var(--success-color, #43b581);
+      }
+      .indicator-status-pill.status-inactive {
+        background: var(--secondary-background-color);
+        color: var(--secondary-text-color);
+      }
+      .indicator-preview-inline {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: var(--secondary-background-color);
+        font-size: 0.85rem;
+        flex-wrap: wrap;
+      }
+      .indicator-preview-inline code {
+        font-size: 0.85rem;
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: var(--primary-background-color);
+      }
+      .indicator-preview-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        flex-shrink: 0;
+      }
+      .indicator-preview-dot.dot-active {
+        background: var(--success-color, #43b581);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--success-color, #43b581) 25%, transparent);
+      }
+      .indicator-preview-dot.dot-inactive {
+        background: var(--disabled-text-color, var(--secondary-text-color));
+      }
+      .button-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .toolbar-spacer {
+        flex: 1;
+      }
+      .add-indicator-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .add-indicator-row ha-form {
+        flex: 1;
+        min-width: 200px;
+      }
+      .show-all-toggle {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+        padding-bottom: 8px;
+        white-space: nowrap;
+      }
+      .threshold-section {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        border-top: 1px solid var(--divider-color);
+        padding-top: 16px;
+      }
+      .threshold-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .threshold-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .threshold-row ha-textfield {
+        flex: 1 1 0;
+        min-width: 70px;
+      }
+      .threshold-row ha-color-picker {
+        flex: 1 1 0;
+        min-width: 80px;
+      }
+      .threshold-row .threshold-icon-form {
+        flex: 1 1 0;
+        min-width: 80px;
+      }
+      .override-panel {
+        margin-bottom: 8px;
+      }
+      .override-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+      }
+      .override-title {
+        font-weight: 500;
+        font-size: 14px;
+      }
+      .override-content {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 8px 0;
+      }
+      .rule-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        border-top: 1px solid var(--divider-color);
+        padding-top: 16px;
+      }
+      .rule-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--divider-color);
+        border-radius: 8px;
+      }
+      .rule-row-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .section-sublabel {
+        font-weight: 500;
+        font-size: 13px;
+        color: var(--secondary-text-color);
+      }
+      ha-color-picker {
+        display: block;
+      }
+      .action-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        border-top: 1px solid var(--divider-color);
+        padding-top: 16px;
+      }
+      .styling-group {
+        margin-top: 8px;
+        padding-top: 16px;
+        border-top: 1px solid var(--divider-color);
+      }
+      .styling-group .section-label {
+        display: block;
+      }
+      ha-button {
+        cursor: pointer;
+      }
+      ha-button[disabled] {
+        cursor: default;
+      }
+      ha-icon-button {
+        --mdc-icon-button-size: 36px;
+        --mdc-icon-size: 20px;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+      }
+      ha-icon-button[disabled] {
+        opacity: 0.4;
+        cursor: default;
+        pointer-events: none;
+      }
+      ha-icon-button.icon-button-danger {
+        color: var(--error-color);
+        --icon-primary-color: var(--error-color);
+      }
+      /* Fallback so ha-icon-button still looks like a button before upgrade. */
+      ha-icon-button:not(:defined) {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 999px;
+        border: none;
+        background: transparent;
+        color: var(--secondary-text-color);
+        cursor: pointer;
+        box-sizing: border-box;
+      }
+      ha-icon-button.icon-button-danger:not(:defined) {
+        color: var(--error-color);
+      }
+      /* Fallback styling so buttons still look like buttons before the
+         ha-button custom element has upgraded (or if it isn't registered). */
+      ha-button:not(:defined) {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 36px;
+        padding: 0 16px;
+        border-radius: 18px;
+        border: 1px solid var(--primary-color);
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        font-family: var(--mdc-typography-button-font-family, var(--paper-font-body1_-_font-family, inherit));
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        user-select: none;
+        box-sizing: border-box;
+      }
+      ha-button[size="small"]:not(:defined) {
+        height: 32px;
+        padding: 0 12px;
+        font-size: 0.8125rem;
+      }
+      ha-button[appearance="filled"]:not(:defined) {
+        background: var(--primary-color);
+        color: var(--text-primary-color, #fff);
+        border-color: var(--primary-color);
+      }
+      ha-button[appearance="outlined"]:not(:defined) {
+        background: transparent;
+        color: var(--primary-color);
+        border-color: var(--primary-color);
+      }
+      ha-button[appearance="plain"]:not(:defined) {
+        background: transparent;
+        color: var(--primary-color);
+        border-color: transparent;
+      }
+      ha-button[variant="danger"]:not(:defined) {
+        color: var(--error-color);
+      }
+      ha-button[appearance="filled"][variant="danger"]:not(:defined) {
+        background: var(--error-color);
+        color: var(--text-primary-color, #fff);
+        border-color: var(--error-color);
+      }
+      ha-button[appearance="outlined"][variant="danger"]:not(:defined) {
+        background: transparent;
+        color: var(--error-color);
+        border-color: var(--error-color);
+      }
+      ha-button[disabled]:not(:defined) {
+        opacity: 0.5;
+        cursor: default;
+        pointer-events: none;
+      }
+      ha-form {
+        display: block;
+      }
+    `;
+    AdvancedAreaCardEditor._stylesCache = css;
+    return css;
+  }
+
+  // Called when an area selector changes. index is the slot index within
+  // the rendered area list — it may be past the end of config.areas when it
+  // refers to the pending "new" slot added by the Add area button (or the
+  // initial empty slot shown before any area has been chosen).
+  handleAreaSlotChange(index, newArea) {
+    const existing = getConfigAreaIds(this._config);
+
+    // Adding a new area (initial empty slot, or the pending "add" slot).
+    if (index >= existing.length) {
+      if (!newArea) return;
+      if (existing.includes(newArea)) {
+        // Duplicate — just collapse the pending slot.
+        this._addingArea = false;
+        this.render();
+        return;
+      }
+      if (existing.length === 0) {
+        // First area ever: start from a freshly normalized config so chips,
+        // indicators, title and icon all reset cleanly.
+        this._config = normalizeConfig({ type: DEFAULT_CARD_TYPE, areas: [newArea] });
+        this._pendingIndicatorCandidate = "";
+      } else {
+        this._config.areas = [...existing, newArea];
+        this._config.area = this._config.areas[0];
+      }
+      this._addingArea = false;
+      this.emitConfig();
+      this.render();
+      return;
+    }
+
+    // Editing an existing slot.
+    const current = existing[index];
+    if (current === newArea) return;
+
+    if (!newArea) {
+      // User cleared the selector — drop that slot.
+      const next = existing.filter((_, i) => i !== index);
+      if (next.length === 0) {
+        this._config = normalizeConfig({ type: DEFAULT_CARD_TYPE, areas: [] });
+        this._pendingIndicatorCandidate = "";
+        this._addingArea = false;
+      } else {
+        this._config.areas = next;
+        this._config.area = next[0];
+      }
+      this.emitConfig();
+      this.render();
+      return;
+    }
+
+    if (existing.includes(newArea)) {
+      // Duplicate — revert the UI to the current value.
+      this.render();
+      return;
+    }
+
+    const next = [...existing];
+    next[index] = newArea;
+    this._config.areas = next;
+    this._config.area = next[0];
+    this.emitConfig();
+    this.render();
+  }
+
+  handleClick(event) {
+    const button = event.target.closest("[data-action]");
+    if (!button) return;
+    const action = button.dataset.action;
+
+    if (action === "toggle-indicator-show-all") {
+      this._indicatorShowAll = !this._indicatorShowAll;
+      this.render();
+      return;
+    }
+    if (action === "show-add-area") {
+      if (this._addingArea) return;
+      this._addingArea = true;
+      this.render();
+      return;
+    }
+    if (action === "remove-area") {
+      const index = Number(button.dataset.areaIndex);
+      if (!Number.isFinite(index) || index < 0) return;
+      const existing = getConfigAreaIds(this._config);
+      // Pending "new" slot sits just past the committed area list.
+      if (this._addingArea && index === existing.length) {
+        this._addingArea = false;
+        this.render();
+        return;
+      }
+      if (index >= existing.length) return;
+      const next = existing.filter((_, i) => i !== index);
+      if (next.length === 0) {
+        // Removing the last committed area resets the editor entirely.
+        this._config = normalizeConfig({ type: DEFAULT_CARD_TYPE, areas: [] });
+        this._pendingIndicatorCandidate = "";
+        this._addingArea = false;
+      } else {
+        this._config.areas = next;
+        this._config.area = next[0];
+      }
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "add-chip") {
+      const type = button.dataset.type;
+      if (type && !this._config.chips.some((c) => c.type === type)) {
+        this._config.chips = [...this._config.chips, createDefaultChip(type)];
+        this.emitConfig();
+        this.render();
+      }
+      return;
+    }
+    if (action === "remove-chip") {
+      this._config.chips = this._config.chips.filter((_, i) => i !== Number(button.dataset.chipIndex));
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "move-chip-up" || action === "move-chip-down") {
+      const i = Number(button.dataset.chipIndex);
+      this.moveItem(this._config.chips, i, i + (action === "move-chip-up" ? -1 : 1));
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "add-all-entities") {
+      const chipIndex = Number(button.dataset.chipIndex);
+      const chip = this._config.chips[chipIndex];
+      const areaIds = getConfigAreaIds(this._config);
+      if (!chip || !this._hass || !this._registry || !areaIds.length) return;
+      const candidates = getChipCandidates(this._hass, this._registry, areaIds, chip.type);
+      chip.entity_ids = unique([...(chip.entity_ids || []), ...candidates]);
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "add-threshold") {
+      const chip = this._config.chips[Number(button.dataset.chipIndex)];
+      chip.thresholds = [...(chip.thresholds || []), { value: 0, color: "#43b581" }];
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "remove-threshold") {
+      const chip = this._config.chips[Number(button.dataset.chipIndex)];
+      chip.thresholds = chip.thresholds.filter((_, i) => i !== Number(button.dataset.thresholdIndex));
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "remove-indicator") {
+      this._config.activity_indicators = this._config.activity_indicators.filter((_, i) => i !== Number(button.dataset.indicatorIndex));
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "move-indicator-up" || action === "move-indicator-down") {
+      const i = Number(button.dataset.indicatorIndex);
+      this.moveItem(this._config.activity_indicators, i, i + (action === "move-indicator-up" ? -1 : 1));
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "add-indicator-condition") {
+      const indicator = this._config.activity_indicators[Number(button.dataset.indicatorIndex)];
+      if (!indicator) return;
+      indicator.and_if = [...(indicator.and_if || []), { type: "state", entity_id: [], attribute: null, aggregation: "any", operator: "eq", value: "", for: 0 }];
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "remove-indicator-condition") {
+      const indicator = this._config.activity_indicators[Number(button.dataset.indicatorIndex)];
+      if (!indicator) return;
+      indicator.and_if = (indicator.and_if || []).filter((_, i) => i !== Number(button.dataset.conditionIndex));
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "add-display-override") {
+      const indicator = this._config.activity_indicators[Number(button.dataset.indicatorIndex)];
+      if (!indicator) return;
+      indicator.display = indicator.display || {};
+      indicator.display.display_overrides = [
+        ...(indicator.display.display_overrides || []),
+        { match: { type: "numeric", operator: "gt", value: 0 } },
+      ];
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "remove-display-override") {
+      const indicator = this._config.activity_indicators[Number(button.dataset.indicatorIndex)];
+      if (!indicator || !indicator.display) return;
+      indicator.display.display_overrides = (indicator.display.display_overrides || []).filter((_, i) => i !== Number(button.dataset.entryIndex));
+      this.emitConfig();
+      this.render();
+      return;
+    }
+  }
+
+  moveItem(list, from, to) {
+    if (to < 0 || to >= list.length || from === to) {
+      return;
+    }
+    const items = [...list];
+    const [entry] = items.splice(from, 1);
+    items.splice(to, 0, entry);
+    list.length = 0;
+    list.push(...items);
+  }
+
+  handleChange(event) {
+    if (this._suppressEvents) return;
+    const target = event.composedPath().find((el) => el?.dataset?.kind) || event.target;
+    const kind = target?.dataset?.kind;
+    if (!kind) return;
+    const value = target.value;
+
+    if (kind === "chip-threshold") {
+      const chip = this._config.chips[Number(target.dataset.chipIndex)];
+      const threshold = chip.thresholds[Number(target.dataset.thresholdIndex)];
+      threshold.value = parseNumber(value) ?? 0;
+      chip.thresholds = [...chip.thresholds].sort((a, b) => a.value - b.value);
+      this.emitConfig();
+      this.render();
+      return;
+    }
+  }
+}
+
+if (!customElements.get(CARD_TYPE)) {
+  customElements.define(CARD_TYPE, AdvancedAreaCard);
+}
+if (!customElements.get("advanced-area-card-editor")) {
+  customElements.define("advanced-area-card-editor", AdvancedAreaCardEditor);
+}
+
+window.customCards = window.customCards || [];
+window.customCards.push({
+  type: CARD_TYPE,
+  name: "Advanced Area",
+  description: "Area summary card with chips, thresholds, and activity indicators.",
+  preview: true,
+  documentationURL: "https://github.com/riaan/advanced-area-card",
+});
+
+console.info(`%c ADVANCED-AREA-CARD %c ${VERSION} `, "color: white; background: #1f6b8f; font-weight: 700;", "color: #1f6b8f; background: white; font-weight: 700;");
