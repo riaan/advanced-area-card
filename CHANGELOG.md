@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.1]
+
 ### Fixed
 
 - Indicators with a `for` delay and time-of-day rules no longer get stuck after the card is detached and reattached (view switch, dashboard edit mode): timers are re-armed on reconnect.
