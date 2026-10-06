@@ -74,39 +74,6 @@ const CHIP_DEFINITIONS = {
   },
 };
 
-const ACTIVITY_ROLES = {
-  movement: {
-    label: "Movement",
-    icon: "mdi:motion-sensor",
-    color: "#ff9800",
-  },
-  door: {
-    label: "Door",
-    icon: "mdi:door-open",
-    color: "#f5c542",
-  },
-  window: {
-    label: "Window",
-    icon: "mdi:window-open",
-    color: "#f5c542",
-  },
-  heating: {
-    label: "Heating",
-    icon: "mdi:radiator",
-    color: "#ef5350",
-  },
-  cooling: {
-    label: "Cooling",
-    icon: "mdi:air-conditioner",
-    color: "#4fa3ff",
-  },
-  fan: {
-    label: "Fan",
-    icon: "mdi:fan",
-    color: "#43b581",
-  },
-};
-
 // SVG paths used by icon-only ha-icon-button instances in the editor.
 const MDI_PATH = {
   arrowUp: "M13,20H11V8L5.5,13.5L4.08,12.08L12,4.16L19.92,12.08L18.5,13.5L13,8V20Z",
@@ -173,24 +140,6 @@ function buildStyleVars(styling) {
   return parts.join(";");
 }
 
-// For numeric sensor states, returns the highest threshold whose value is
-// less than or equal to the current value. Used by both chips and (now)
-// activity indicators that point at a numeric sensor.
-// Thresholds are pre-sorted by normalizeConfig / normalizeIndicatorThresholds.
-function pickThresholdMatch(thresholds, value) {
-  if (!thresholds || !thresholds.length) return null;
-  if (value === null || value === undefined || Number.isNaN(value)) return null;
-  let match = null;
-  for (let i = 0; i < thresholds.length; i++) {
-    if (value >= thresholds[i].value) {
-      match = thresholds[i];
-    } else {
-      break;
-    }
-  }
-  return match;
-}
-
 const HA_STATE_COLORS = new Set([
   "primary", "accent", "disabled",
   "red", "pink", "purple", "deep-purple", "indigo",
@@ -220,7 +169,6 @@ function resolveColor(color) {
 }
 
 const registryCache = {
-  hass: null,
   promise: null,
   data: null,
 };
@@ -278,14 +226,6 @@ function fireEvent(node, type, detail = {}, options = {}) {
   });
   node.dispatchEvent(event);
   return event;
-}
-
-function slugify(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64);
 }
 
 function makeId(prefix) {
@@ -379,15 +319,6 @@ function normalizeStyling(input) {
   return styling;
 }
 
-function normalizeIndicatorThresholds(thresholds) {
-  if (!Array.isArray(thresholds)) return [];
-  return thresholds.map((threshold) => ({
-    value: parseNumber(threshold.value) ?? 0,
-    color: threshold.color || "",
-    icon_size: parseNumber(threshold.icon_size),
-  })).sort((a, b) => a.value - b.value);
-}
-
 function normalizeConfig(inputConfig) {
   const config = clone(inputConfig || {});
   if (config.type !== DEFAULT_CARD_TYPE) {
@@ -479,21 +410,6 @@ function getAreaMeta(registry, areaId) {
   return registryMaps.areaById?.get(areaId) || null;
 }
 
-function getEntityRegistryEntry(registry, entityId) {
-  ensureRegistryMaps(registry);
-  return registryMaps.entityById?.get(entityId) || null;
-}
-
-function getEntityAreaId(registry, entityId) {
-  ensureRegistryMaps(registry);
-  return registryMaps.entityToArea?.get(entityId) || null;
-}
-
-function getAreaEntityIds(hass, registry, areaId) {
-  if (!hass || !registry || !areaId) return [];
-  return getAreasEntityIds(hass, registry, [areaId]);
-}
-
 // Aggregate entity IDs across multiple areas. Uses the pre-built
 // entityToArea map so it's a single pass over hass.states with O(1)
 // lookups instead of O(entities × registry) scans.
@@ -532,10 +448,6 @@ function getFriendlyName(stateObj, entityId) {
 
 function getEntityLabel(hass, entityId) {
   return getFriendlyName(hass.states[entityId], entityId);
-}
-
-function isNumberState(stateObj) {
-  return parseNumber(stateObj?.state) !== null;
 }
 
 function getUnit(stateObj) {
@@ -640,11 +552,6 @@ function roundValue(value, digits = 1) {
   }
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
-}
-
-function resolveThresholdColor(value, thresholds, fallback) {
-  const match = resolveThresholdEntry(value, thresholds);
-  return match?.color || fallback;
 }
 
 // Returns the winning threshold entry (with original `icon` field preserved)
@@ -912,10 +819,8 @@ function applyOperator(operator, left, right) {
   switch (op) {
     case "eq":
       // Loose comparison so "5" == 5 and "on" == "on" both work.
-      // eslint-disable-next-line eqeqeq
       return left == right;
     case "ne":
-      // eslint-disable-next-line eqeqeq
       return left != right;
     case "gt": return Number(left) > Number(right);
     case "gte": return Number(left) >= Number(right);
@@ -1616,10 +1521,6 @@ function renderIndicatorTemplate(template, representative) {
   });
 }
 
-function indicatorIsActive(indicator, hass, ctx) {
-  return evaluateIndicatorRaw(indicator, hass, ctx);
-}
-
 function buildIndicatorModel(hass, config, indicator, ctx) {
   const display = indicator.display || normalizeDisplay(null, null);
   // Prefer the cached eval populated by `_refreshTrueSince`: it was just
@@ -1810,18 +1711,6 @@ function getAllIndicatorCandidates(hass) {
   );
 }
 
-function parseJsonOrEmpty(value) {
-  if (!value || !String(value).trim()) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === "object" && parsed !== null ? parsed : {};
-  } catch (_error) {
-    return {};
-  }
-}
-
 function performNavigation(path) {
   if (!path) {
     return;
@@ -1899,6 +1788,12 @@ class AdvancedAreaCard extends HTMLElement {
       clearTimeout(this._registryRetryTimer);
       this._registryRetryTimer = null;
     }
+    // A press in progress must not fire its hold action after the card left
+    // the DOM.
+    this.shadowRoot.querySelectorAll("[data-interactive]").forEach((element) => {
+      const state = activeActionMap.get(element);
+      if (state) clearTimeout(state.timer);
+    });
   }
 
   // Load the registry once; concurrent callers share the in-flight load and
@@ -1942,8 +1837,24 @@ class AdvancedAreaCard extends HTMLElement {
     this._lastBranch = null;
     this._rebuildIndicatorDependencies();
     this._rebuildWatchedSets();
+    this._pruneIndicatorState();
     this._updateTimeTicker();
+    // Rebuild the cached rule evaluation (cleared above) and re-arm any
+    // `for_duration` timers for the new config.
+    if (this._hass) this._refreshTrueSince(null);
     this.render();
+  }
+
+  // Drop `for_duration` bookkeeping of indicators that are no longer in the
+  // config, so removed indicators don't keep stale timers or timestamps.
+  _pruneIndicatorState() {
+    const ids = new Set((this._config?.activity_indicators || []).map((indicator) => indicator.id));
+    for (const id of [...this._trueSince.keys()]) {
+      if (!ids.has(id)) this._trueSince.delete(id);
+    }
+    for (const id of [...this._forTimers.keys()]) {
+      if (!ids.has(id)) this._clearForTimer(id);
+    }
   }
 
   set hass(hass) {
@@ -2197,6 +2108,16 @@ class AdvancedAreaCard extends HTMLElement {
 
   getCardSize() {
     return 3;
+  }
+
+  // Sections dashboard: full width by default (12-column grid), height
+  // follows the content because chips and indicators can wrap.
+  getGridOptions() {
+    return {
+      columns: 12,
+      rows: "auto",
+      min_columns: 6,
+    };
   }
 
   connectedCallback() {
@@ -3529,7 +3450,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     if (!form) return;
     const baseRule = rule || { type: "state" };
     const schema = this._getRuleSchema(baseRule, includeEntities);
-    const firstEntity = toEntityList(baseRule.entity_id)[0] || "";
     // Flat form shape: the ha-form works in flat keys, so we serialize a
     // few rule fields into flat keys and round-trip them.
     const formValue = {
