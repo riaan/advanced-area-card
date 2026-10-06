@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Chips and indicators can be activated with the keyboard (Tab to focus, Enter or Space for the tap action) and by screen readers.
+- Chips and indicators have an `aria-label` (chip name and value, indicator tooltip or name).
+- Indicator animations are disabled when the system asks for reduced motion (`prefers-reduced-motion`).
+
 ### Changed
 
 - **Requires Home Assistant 2026.7 or newer** (`hacs.json`). Home Assistant migrated its form components to Web Awesome; older versions stay on v1.0.1.
