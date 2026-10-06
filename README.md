@@ -10,6 +10,10 @@ A Home Assistant dashboard card that summarises one or more **areas** at a glanc
 - Follows your Home Assistant theme (light / dark) and works with `card-mod`.
 - Only re-renders when an entity the card actually watches changes.
 
+## Requirements
+
+Home Assistant **2026.7 or newer**. On older versions use release [v1.0.1](https://github.com/riaan/advanced-area-card/releases/tag/v1.0.1).
+
 ## Installation
 
 ### HACS (recommended)
