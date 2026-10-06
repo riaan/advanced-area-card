@@ -10,9 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Chips and indicators can be activated with the keyboard (Tab to focus, Enter or Space for the tap action) and by screen readers.
 - Chips and indicators have an `aria-label` (chip name and value, indicator tooltip or name).
 - Indicator animations are disabled when the system asks for reduced motion (`prefers-reduced-motion`).
+- Sections dashboards: the card is full width by default, can be resized down to half a section, and its height follows its content (`getGridOptions`).
+
+### Fixed
+
+- Editing a card no longer leaves stale `for` timers or timestamps for removed indicators, and `for` delays of existing indicators are re-armed after a config change.
+- A press in progress no longer fires its hold action after the card is removed from the page.
 
 ### Changed
 
+- Internal cleanup: removed unused helper functions and constants.
 - **Requires Home Assistant 2026.7 or newer** (`hacs.json`). Home Assistant migrated its form components to Web Awesome; older versions stay on v1.0.1.
 - Editor: the "Add" buttons use the current `ha-button` size name (`s`) instead of the removed `small`.
 - Editor: the threshold "Min value" field is now a standard form number selector instead of the deprecated `ha-textfield` element.
