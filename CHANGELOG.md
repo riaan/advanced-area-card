@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Requires Home Assistant 2026.7 or newer** (`hacs.json`). Home Assistant migrated its form components to Web Awesome; older versions stay on v1.0.1.
+- Editor: the "Add" buttons use the current `ha-button` size name (`s`) instead of the removed `small`.
+- Editor: the threshold "Min value" field is now a standard form number selector instead of the deprecated `ha-textfield` element.
+
 ## [1.0.1]
 
 ### Fixed

@@ -2832,7 +2832,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._selfEmitting = false;
     this._addingArea = false;
     this._indicatorShowAll = false;
-    this._boundChange = this.handleChange.bind(this);
     this._boundClick = this.handleClick.bind(this);
   }
 
@@ -2840,7 +2839,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     if (!this._listenersBound) {
       this._listenersBound = true;
       this.shadowRoot.addEventListener("click", this._boundClick);
-      this.shadowRoot.addEventListener("change", this._boundChange);
     }
     this.render();
   }
@@ -2852,7 +2850,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     }
     if (this._listenersBound) {
       this.shadowRoot.removeEventListener("click", this._boundClick);
-      this.shadowRoot.removeEventListener("change", this._boundChange);
       this._listenersBound = false;
     }
     if (this._registryRetryTimer !== null) {
@@ -3614,7 +3611,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
     }
     return available
       .map((type) => `
-        <ha-button appearance="filled" size="small" data-action="add-chip" data-type="${htmlEscape(type)}">
+        <ha-button appearance="filled" size="s" data-action="add-chip" data-type="${htmlEscape(type)}">
           <ha-icon icon="mdi:plus" slot="start"></ha-icon>
           ${htmlEscape(CHIP_DEFINITIONS[type].label)}
         </ha-button>
@@ -3630,23 +3627,17 @@ class AdvancedAreaCardEditor extends HTMLElement {
       <div class="threshold-section">
         <div class="threshold-header">
           <span class="section-label">Threshold colors</span>
-          <ha-button appearance="filled" size="small" data-action="add-threshold" data-chip-index="${chipIndex}">
+          <ha-button appearance="filled" size="s" data-action="add-threshold" data-chip-index="${chipIndex}">
             <ha-icon icon="mdi:plus" slot="start"></ha-icon>
             Add row
           </ha-button>
         </div>
         ${(chip.thresholds || []).map((threshold, thresholdIndex) => `
           <div class="threshold-row">
-            <ha-textfield
-              label="Min value"
-              type="number"
-              data-kind="chip-threshold"
-              data-field="value"
-              data-chip-index="${chipIndex}"
-              data-threshold-index="${thresholdIndex}"
-              value="${htmlEscape(threshold.value)}"
-              step="0.1"
-            ></ha-textfield>
+            <ha-form
+              id="chip-${chipIndex}-threshold-${thresholdIndex}-value"
+              class="threshold-value-form"
+            ></ha-form>
             <ha-color-picker
               id="chip-${chipIndex}-threshold-${thresholdIndex}-color"
               label="Color"
@@ -3687,7 +3678,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         </div>
         <div class="panel-content">
           <div class="toolbar">
-            <ha-button appearance="filled" size="small" data-action="add-all-entities" data-chip-index="${chipIndex}" ${unselectedCount === 0 ? "disabled" : ""}>
+            <ha-button appearance="filled" size="s" data-action="add-all-entities" data-chip-index="${chipIndex}" ${unselectedCount === 0 ? "disabled" : ""}>
               <ha-icon icon="mdi:playlist-plus" slot="start"></ha-icon>
               Add all entities${unselectedCount > 0 ? ` (${unselectedCount})` : ""}
             </ha-button>
@@ -3840,7 +3831,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
           <div class="rule-section">
             <div class="threshold-header">
               <span class="section-label">And if (optional)</span>
-              <ha-button appearance="filled" size="small" data-action="add-indicator-condition" data-indicator-index="${indicatorIndex}">
+              <ha-button appearance="filled" size="s" data-action="add-indicator-condition" data-indicator-index="${indicatorIndex}">
                 <ha-icon icon="mdi:plus" slot="start"></ha-icon>
                 Add condition
               </ha-button>
@@ -3866,7 +3857,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
           <div class="rule-section">
             <div class="threshold-header">
               <span class="section-label">Conditional display (optional)</span>
-              <ha-button appearance="filled" size="small" data-action="add-display-override" data-indicator-index="${indicatorIndex}">
+              <ha-button appearance="filled" size="s" data-action="add-display-override" data-indicator-index="${indicatorIndex}">
                 <ha-icon icon="mdi:plus" slot="start"></ha-icon>
                 Add override
               </ha-button>
@@ -3988,7 +3979,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         <div class="area-list">${areaRowsMarkup}</div>
         ${showAddButton ? `
           <div class="area-add-row">
-            <ha-button appearance="filled" size="small" data-action="show-add-area">
+            <ha-button appearance="filled" size="s" data-action="show-add-area">
               <ha-icon icon="mdi:plus" slot="start"></ha-icon>
               Add area
             </ha-button>
@@ -4222,6 +4213,18 @@ class AdvancedAreaCardEditor extends HTMLElement {
               (value) => {
                 this._config.chips[i].thresholds[ti].color = value;
                 this.emitConfig();
+              },
+            );
+            this._setupForm(
+              `chip-${i}-threshold-${ti}-value`,
+              { value: threshold.value },
+              [{ name: "value", selector: { number: { mode: "box", step: 0.1 } } }],
+              (data) => {
+                const entry = this._config.chips[i].thresholds[ti];
+                entry.value = parseNumber(data.value) ?? 0;
+                this._config.chips[i].thresholds = [...this._config.chips[i].thresholds].sort((a, b) => a.value - b.value);
+                this.emitConfig();
+                this.render();
               },
             );
             this._setupForm(
@@ -4562,7 +4565,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
           ? form.shadowRoot?.querySelector?.(`[name="${info.fieldName}"]`)
           : null;
         const target = byName
-          || form.shadowRoot?.querySelector?.("input, textarea, ha-textfield, ha-select")
+          || form.shadowRoot?.querySelector?.("input, textarea, ha-input, ha-select")
           || null;
         if (!target) return;
         if (typeof target.focus === "function") target.focus();
@@ -4836,7 +4839,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         align-items: center;
         gap: 8px;
       }
-      .threshold-row ha-textfield {
+      .threshold-row .threshold-value-form {
         flex: 1 1 0;
         min-width: 70px;
       }
@@ -4969,7 +4972,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         user-select: none;
         box-sizing: border-box;
       }
-      ha-button[size="small"]:not(:defined) {
+      ha-button[size="s"]:not(:defined) {
         height: 32px;
         padding: 0 12px;
         font-size: 0.8125rem;
@@ -5228,24 +5231,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     items.splice(to, 0, entry);
     list.length = 0;
     list.push(...items);
-  }
-
-  handleChange(event) {
-    if (this._suppressEvents) return;
-    const target = event.composedPath().find((el) => el?.dataset?.kind) || event.target;
-    const kind = target?.dataset?.kind;
-    if (!kind) return;
-    const value = target.value;
-
-    if (kind === "chip-threshold") {
-      const chip = this._config.chips[Number(target.dataset.chipIndex)];
-      const threshold = chip.thresholds[Number(target.dataset.thresholdIndex)];
-      threshold.value = parseNumber(value) ?? 0;
-      chip.thresholds = [...chip.thresholds].sort((a, b) => a.value - b.value);
-      this.emitConfig();
-      this.render();
-      return;
-    }
   }
 }
 
