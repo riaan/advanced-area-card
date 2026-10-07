@@ -59,6 +59,36 @@ Edit dashboard → **Add card** → search **Advanced Area**. Pick one or more a
 | `music`       | number of media players that are `playing`, `buffering` or `on`                | active / inactive colour                        |
 | `lux`         | average of illuminance sensors                                                 | threshold colours and icons                     |
 
+### Custom chips
+
+The five chips above are presets. A **custom chip** (`type: custom`, add as many as you like) works with **any entities**, inside or outside the area, and shows either:
+
+- a **number** (`mode: numeric`): the `avg`, `sum`, `min`, `max` or `first` of the entities' states, or of an `attribute`, with `decimals`, an optional `unit` (defaults to the entity's own unit) and optional threshold colours and icons; or
+- a **count** (`mode: count`) of the entities that match a condition (`count_operator`: `truthy`, `falsy`, `eq`, `ne`, `in`, `not_in`, `contains`, `gt`, `gte`, `lt`, `lte`, with `count_value`). With the default `truthy` it counts entities that are on / open / active.
+
+```yaml
+chips:
+  - type: custom
+    name: CO2
+    icon: mdi:molecule-co2
+    entity_ids: [sensor.living_room_co2, sensor.kitchen_co2]
+    mode: numeric
+    aggregation: max
+    decimals: 0
+    thresholds:
+      - { value: 0, color: "#43b581" }
+      - { value: 1000, color: "#ff9800" }
+      - { value: 1500, color: "#f44336" }
+  - type: custom
+    name: Open windows
+    icon: mdi:window-open
+    entity_ids: [binary_sensor.window_1, binary_sensor.window_2]
+    mode: count
+    hidden_when_zero: true
+```
+
+In the editor, the attribute and value pickers follow the first selected entity, so you pick from its real attributes and states.
+
 Per chip you can:
 
 - reorder it and override its **icon**;

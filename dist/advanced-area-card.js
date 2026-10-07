@@ -72,7 +72,18 @@ const CHIP_DEFINITIONS = {
     icon: "mdi:white-balance-sunny",
     inactiveColor: "rgba(255,255,255,0.38)",
   },
+  // Free-form chip: any entities, a number (average, sum, min, max) or a
+  // count of entities matching a condition. Can be added more than once.
+  custom: {
+    label: "Custom",
+    icon: "mdi:counter",
+    activeColor: "#43b581",
+    inactiveColor: "rgba(255,255,255,0.38)",
+  },
 };
+
+const CUSTOM_CHIP_AGGREGATIONS = ["avg", "sum", "min", "max", "first"];
+const CUSTOM_CHIP_NUMERIC_OPERATORS = ["gt", "gte", "lt", "lte"];
 
 // SVG paths used by icon-only ha-icon-button instances in the editor.
 const MDI_PATH = {
@@ -292,7 +303,7 @@ function unique(values) {
 }
 
 function createDefaultChip(type) {
-  return {
+  const chip = {
     id: makeId(type),
     type,
     icon: CHIP_DEFINITIONS[type]?.icon || "mdi:circle",
@@ -303,6 +314,19 @@ function createDefaultChip(type) {
     tap_action: { action: "more-info" },
     hold_action: { action: "none" },
   };
+  if (type === "custom") {
+    Object.assign(chip, {
+      name: "",
+      mode: "numeric",        // "numeric" (aggregate a value) | "count" (count matches)
+      aggregation: "avg",
+      attribute: "",
+      unit: "",
+      decimals: 1,
+      count_operator: "truthy",
+      count_value: "",
+    });
+  }
+  return chip;
 }
 
 function normalizeStyling(input) {
@@ -350,6 +374,7 @@ function normalizeConfig(inputConfig) {
     ...chip,
     id: chip.id || makeId(chip.type || "chip"),
     use_light_color: chip.use_light_color === true,
+    ...(chip.type === "custom" ? { use_custom_entities: true } : {}),
     entity_ids: unique(chip.entity_ids || []),
     thresholds: (Array.isArray(chip.thresholds) && chip.thresholds.length
       ? chip.thresholds.map((threshold) => ({
@@ -588,7 +613,7 @@ function formatNumber(value, digits = 0) {
 // for all chips instead of once per chip.
 function pickChipEntityIds(hass, registry, areaIds, chip, cachedAreaEntityIds) {
   const areaEntityIds = cachedAreaEntityIds || getAreasEntityIds(hass, registry, areaIds);
-  const candidates = chip.use_custom_entities ? (chip.entity_ids || []) : areaEntityIds;
+  const candidates = (chip.use_custom_entities || chip.type === "custom") ? (chip.entity_ids || []) : areaEntityIds;
   return unique(candidates).filter((entityId) => {
     const stateObj = hass.states[entityId];
     if (!stateObj) {
@@ -605,6 +630,8 @@ function pickChipEntityIds(hass, registry, areaIds, chip, cachedAreaEntityIds) {
         return isHumidityEntity(stateObj, entityId);
       case "lux":
         return isLuxEntity(stateObj, entityId);
+      case "custom":
+        return true;
       default:
         return false;
     }
@@ -632,6 +659,63 @@ function averageLightColor(hass, entityIds) {
   return `rgb(${Math.round(r / count)},${Math.round(g / count)},${Math.round(b / count)})`;
 }
 
+// "5 lx", "21.5°C", "42%": symbols attach directly, words get a space.
+function formatChipUnit(unit) {
+  if (!unit) return "";
+  return /^[%°]/.test(unit) ? unit : ` ${unit}`;
+}
+
+function buildCustomChipModel(hass, chip, base, entityIds, definition) {
+  // Up to `decimals` fraction digits; trailing zeros are dropped (900, not 900.0).
+  const decimals = Math.min(4, Math.max(0, Math.round(parseNumber(chip.decimals) ?? 1)));
+  const readRaw = (stateObj) => (chip.attribute ? getAttrPath(stateObj, chip.attribute) : stateObj.state);
+  const unitOverride = typeof chip.unit === "string" ? chip.unit.trim() : "";
+
+  if (chip.mode === "count") {
+    const operator = chip.count_operator || "truthy";
+    const numericOperator = CUSTOM_CHIP_NUMERIC_OPERATORS.includes(operator);
+    const expected = numericOperator ? parseNumber(chip.count_value) : chip.count_value;
+    let count = 0;
+    for (const entityId of entityIds) {
+      const stateObj = hass.states[entityId];
+      if (stateObj && applyOperator(operator, readRaw(stateObj), expected)) count++;
+    }
+    const active = count > 0;
+    return {
+      ...base,
+      text: `${formatNumber(count, 0)}${formatChipUnit(unitOverride)}`,
+      visible: !(chip.hidden_when_zero && count === 0),
+      color: active ? (chip.active_color || definition.activeColor || "#43b581") : base.mutedColor,
+      active,
+    };
+  }
+
+  const values = [];
+  let entityUnit = "";
+  for (const entityId of entityIds) {
+    const stateObj = hass.states[entityId];
+    if (!stateObj) continue;
+    const numeric = parseNumber(readRaw(stateObj));
+    if (numeric === null) continue;
+    values.push(numeric);
+    if (!entityUnit && !chip.attribute) entityUnit = stateObj.attributes?.unit_of_measurement || "";
+  }
+  const aggregation = CUSTOM_CHIP_AGGREGATIONS.includes(chip.aggregation) ? chip.aggregation : "avg";
+  const value = roundValue(reduceNumeric(values, aggregation), decimals);
+  const match = value === null ? null : resolveThresholdEntry(value, chip.thresholds);
+  const active = value !== null;
+  return {
+    ...base,
+    icon: match?.icon || base.icon,
+    text: value === null
+      ? "--"
+      : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: decimals }).format(value)}${formatChipUnit(unitOverride || entityUnit)}`,
+    visible: !(chip.hidden_when_zero && (value || 0) === 0),
+    color: active ? (match?.color || chip.active_color || definition.activeColor || "#43b581") : base.mutedColor,
+    active,
+  };
+}
+
 function buildChipModel(hass, registry, config, chip, cachedAreaEntityIds) {
   const definition = CHIP_DEFINITIONS[chip.type] || {};
   const entityIds = pickChipEntityIds(hass, registry, getConfigAreaIds(config), chip, cachedAreaEntityIds);
@@ -639,7 +723,7 @@ function buildChipModel(hass, registry, config, chip, cachedAreaEntityIds) {
   const base = {
     id: chip.id,
     type: chip.type,
-    label: definition.label || chip.type,
+    label: (chip.type === "custom" && chip.name) || definition.label || chip.type,
     icon: baseIcon,
     text: "--",
     visible: true,
@@ -650,6 +734,10 @@ function buildChipModel(hass, registry, config, chip, cachedAreaEntityIds) {
     hold_action: chip.hold_action,
     active: true,
   };
+
+  if (chip.type === "custom") {
+    return buildCustomChipModel(hass, chip, base, entityIds, definition);
+  }
 
   if (chip.type === "lights") {
     const onCount = entityIds.filter((entityId) => hass.states[entityId]?.state === "on").length;
@@ -2778,6 +2866,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._addingArea = false;
     this._indicatorShowAll = false;
     this._boundClick = this.handleClick.bind(this);
+    this._emittedJsons = [];
   }
 
   connectedCallback() {
@@ -2819,8 +2908,10 @@ class AdvancedAreaCardEditor extends HTMLElement {
     // Avoid re-rendering when HA bounces our own emitted config back at us.
     // Without this, every keystroke in a text field triggers a full DOM rebuild,
     // which destroys the field mid-typing and causes focus/popup glitches.
+    // Keep our own config object in both bounce cases: replacing it with the
+    // normalized copy would re-sort the threshold table behind the user's
+    // back (and shift which row an open field edits).
     if (this._selfEmitting) {
-      this._config = normalized;
       return;
     }
     // Fast-path: HA bounces our own emit asynchronously. If we just
@@ -2828,12 +2919,12 @@ class AdvancedAreaCardEditor extends HTMLElement {
     // the bounce and skip the full re-render. Cheaper than a deep
     // serialize+compare on every keystroke.
     if (this._configEmittedAt && (performance.now() - this._configEmittedAt) < 150) {
-      this._config = normalized;
       return;
     }
     // External change (YAML edit, etc.). Fall back to serialized compare
     // so we don't rebuild when nothing actually changed.
     const serialized = JSON.stringify(normalized);
+    if (this._emittedJsons.includes(serialized)) return;
     if (this._lastConfigJson === serialized) {
       this._config = normalized;
       return;
@@ -2920,9 +3011,16 @@ class AdvancedAreaCardEditor extends HTMLElement {
     // JSON compare. `_lastConfigJson` is only used for external
     // changes (YAML edits) now, so we don't need to keep it fresh here.
     this._configEmittedAt = performance.now();
+    // Remember what we emitted (in the normalized shape setConfig sees) so a
+    // late echo from HA, arriving after the 150 ms window or after newer
+    // edits, is still recognised and doesn't replace the editor's config.
+    this._emittedJsons.push(JSON.stringify(normalizeConfig(this._config)));
+    if (this._emittedJsons.length > 20) this._emittedJsons.shift();
     this._selfEmitting = true;
     try {
-      fireEvent(this, "config-changed", { config: this._config });
+      // Hand HA a copy: it freezes the config it receives, which would make
+      // our own (still edited) object read-only.
+      fireEvent(this, "config-changed", { config: clone(this._config) });
     } finally {
       this._selfEmitting = false;
     }
@@ -3047,6 +3145,11 @@ class AdvancedAreaCardEditor extends HTMLElement {
       active_color: "Active color",
       entity_id: "Entity",
       add_entity: "Select an entity to add",
+      mode: "Show",
+      count_operator: "Count entities whose value",
+      count_value: "Value",
+      unit: "Unit (optional)",
+      decimals: "Decimals",
       role: "Role",
       color: "Color",
       fan_speed_min: "Fast spin (seconds)",
@@ -3167,6 +3270,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
   }
 
   _getChipSchema(chip) {
+    if (chip.type === "custom") return this._getCustomChipSchema(chip);
     const areaIds = getConfigAreaIds(this._config);
     const candidateIds = this._hass && this._registry && areaIds.length
       ? getChipCandidates(this._hass, this._registry, areaIds, chip.type)
@@ -3183,6 +3287,104 @@ class AdvancedAreaCardEditor extends HTMLElement {
       schema.push({ name: "use_light_color", selector: { boolean: {} } });
     }
     return schema;
+  }
+
+  // Schema of a custom chip. Entities are not limited to the area; the
+  // attribute and value pickers follow the first selected entity.
+  _getCustomChipSchema(chip) {
+    const first = (chip.entity_ids || [])[0] || "";
+    const operator = chip.count_operator || "truthy";
+    const schema = [
+      { name: "entity_ids", selector: { entity: { multiple: true } } },
+      { type: "grid", name: "", schema: [
+        { name: "name", selector: { text: {} } },
+        { name: "icon", selector: { icon: {} } },
+      ]},
+      { name: "mode", selector: { select: { mode: "dropdown", options: [
+        { value: "numeric", label: "A number (average, sum, …)" },
+        { value: "count",   label: "A count of entities matching a condition" },
+      ] } } },
+      { name: "attribute", selector: first ? { attribute: { entity_id: first } } : { text: {} } },
+    ];
+    if (chip.mode === "count") {
+      schema.push({ name: "count_operator", selector: { select: { mode: "dropdown", options: [
+        { value: "truthy",   label: "Is on / open / active" },
+        { value: "falsy",    label: "Is off / closed / inactive" },
+        { value: "eq",       label: "Equals" },
+        { value: "ne",       label: "Not equals" },
+        { value: "in",       label: "Is one of" },
+        { value: "not_in",   label: "Is not one of" },
+        { value: "contains", label: "Contains" },
+        { value: "gt",       label: "Greater than" },
+        { value: "gte",      label: "Greater or equal" },
+        { value: "lt",       label: "Less than" },
+        { value: "lte",      label: "Less or equal" },
+      ] } } });
+      if (CUSTOM_CHIP_NUMERIC_OPERATORS.includes(operator)) {
+        schema.push({ name: "count_value", selector: { number: { mode: "box", step: 0.1 } } });
+      } else {
+        const valueSelector = this._getStateValueSelector({
+          entity_id: first, attribute: chip.attribute, operator,
+        });
+        if (valueSelector) schema.push({ name: "count_value", selector: valueSelector });
+      }
+    } else {
+      schema.push({ type: "grid", name: "", schema: [
+        { name: "aggregation", selector: { select: { mode: "dropdown", options: [
+          { value: "avg",   label: "Average" },
+          { value: "sum",   label: "Sum" },
+          { value: "min",   label: "Minimum" },
+          { value: "max",   label: "Maximum" },
+          { value: "first", label: "First entity" },
+        ] } } },
+        { name: "decimals", selector: { number: { mode: "box", min: 0, max: 4, step: 1 } } },
+      ]});
+    }
+    schema.push(
+      { name: "unit", selector: { text: {} } },
+      { name: "hidden_when_zero", selector: { boolean: {} } },
+    );
+    return schema;
+  }
+
+  // What the custom chip schema depends on; when it changes the chip form
+  // is rebuilt so the right fields show up.
+  _customChipKey(chip) {
+    const first = (chip.entity_ids || [])[0] || "";
+    return `${chip.mode}|${chip.count_operator}|${first}|${first ? chip.attribute || "" : ""}`;
+  }
+
+  // Keep `count_value` in the shape its operator needs (number, list or text).
+  _coerceCustomChipValue(chip) {
+    const operator = chip.count_operator || "truthy";
+    const value = chip.count_value;
+    if (CUSTOM_CHIP_NUMERIC_OPERATORS.includes(operator)) {
+      chip.count_value = parseNumber(Array.isArray(value) ? value[0] : value) ?? "";
+    } else if (operator === "in" || operator === "not_in") {
+      chip.count_value = Array.isArray(value)
+        ? value
+        : String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+    } else if (operator === "truthy" || operator === "falsy") {
+      chip.count_value = "";
+    } else {
+      chip.count_value = Array.isArray(value) ? value.join(", ") : (value ?? "");
+    }
+  }
+
+  // Flags rows that are out of order and shows the hint, without touching
+  // the DOM structure (the row being edited must keep its focus).
+  _markThresholdOrder(chipIndex) {
+    const section = this.shadowRoot.getElementById(`chip-${chipIndex}-threshold-section`);
+    const thresholds = this._config.chips[chipIndex]?.thresholds;
+    if (!section || !Array.isArray(thresholds)) return;
+    let unsorted = false;
+    section.querySelectorAll(".threshold-row").forEach((row) => {
+      const index = Number(row.dataset.thresholdIndex);
+      const outOfOrder = index > 0 && thresholds[index].value < thresholds[index - 1].value;
+      row.classList.toggle("threshold-row--unsorted", outOfOrder);
+      if (outOfOrder) unsorted = true;
+    });
+    section.classList.toggle("threshold-section--unsorted", unsorted);
   }
 
   _getIndicatorCandidateIds() {
@@ -3612,46 +3814,47 @@ class AdvancedAreaCardEditor extends HTMLElement {
     if (!areaIds.length || !this._hass || !this._registry) {
       return `<p class="secondary">Select an area to see available chip types.</p>`;
     }
+    // Custom chips can be added any number of times; presets only once.
     const available = Object.keys(CHIP_DEFINITIONS).filter(
-      (type) => !this._config.chips.some((chip) => chip.type === type)
+      (type) => type === "custom" || !this._config.chips.some((chip) => chip.type === type)
     );
-    if (!available.length) {
-      return `<p class="secondary">All chip types have been added.</p>`;
-    }
     return available
       .map((type) => `
         <ha-button appearance="filled" size="s" data-action="add-chip" data-type="${htmlEscape(type)}">
           <ha-icon icon="mdi:plus" slot="start"></ha-icon>
-          ${htmlEscape(CHIP_DEFINITIONS[type].label)}
+          ${htmlEscape(type === "custom" ? "Custom chip" : CHIP_DEFINITIONS[type].label)}
         </ha-button>
       `)
       .join("");
   }
 
   renderThresholdRows(chip, chipIndex) {
-    if (!["temperature", "humidity", "lux"].includes(chip.type)) {
+    const supportsThresholds = ["temperature", "humidity", "lux"].includes(chip.type)
+      || (chip.type === "custom" && chip.mode !== "count");
+    if (!supportsThresholds) {
       return "";
     }
     return `
-      <div class="threshold-section">
+      <div class="threshold-section" id="chip-${chipIndex}-threshold-section">
         <div class="threshold-header">
           <span class="section-label">Threshold colors</span>
+          <span class="threshold-hint">Rows are out of order</span>
+          <ha-button class="threshold-sort" appearance="filled" size="s" data-action="sort-thresholds" data-chip-index="${chipIndex}">
+            <ha-icon icon="mdi:sort-ascending" slot="start"></ha-icon>
+            Sort by value
+          </ha-button>
           <ha-button appearance="filled" size="s" data-action="add-threshold" data-chip-index="${chipIndex}">
             <ha-icon icon="mdi:plus" slot="start"></ha-icon>
             Add row
           </ha-button>
         </div>
         ${(chip.thresholds || []).map((threshold, thresholdIndex) => `
-          <div class="threshold-row">
-            <ha-form
-              id="chip-${chipIndex}-threshold-${thresholdIndex}-value"
-              class="threshold-value-form"
-            ></ha-form>
-            <ha-form id="chip-${chipIndex}-threshold-${thresholdIndex}-color" class="color-form" data-label="Color"></ha-form>
-            <ha-form
-              id="chip-${chipIndex}-threshold-${thresholdIndex}-icon"
-              class="threshold-icon-form"
-            ></ha-form>
+          <div class="threshold-row" data-threshold-index="${thresholdIndex}">
+            <div class="threshold-fields">
+              <ha-form id="chip-${chipIndex}-threshold-${thresholdIndex}-value"></ha-form>
+              <ha-form id="chip-${chipIndex}-threshold-${thresholdIndex}-color"></ha-form>
+              <ha-form id="chip-${chipIndex}-threshold-${thresholdIndex}-icon" class="threshold-icon"></ha-form>
+            </div>
             <ha-icon-button
               class="icon-button-danger"
               label="Remove threshold"
@@ -3667,7 +3870,8 @@ class AdvancedAreaCardEditor extends HTMLElement {
   }
 
   renderChipEditor(chip, chipIndex) {
-    const supportsCustomColor = (chip.type === "music") || (chip.type === "lights" && !chip.use_light_color);
+    const isCustom = chip.type === "custom";
+    const supportsCustomColor = isCustom || (chip.type === "music") || (chip.type === "lights" && !chip.use_light_color);
     const areaIds = getConfigAreaIds(this._config);
     const candidateIds = this._hass && this._registry && areaIds.length
       ? getChipCandidates(this._hass, this._registry, areaIds, chip.type)
@@ -3677,17 +3881,18 @@ class AdvancedAreaCardEditor extends HTMLElement {
       <ha-expansion-panel outlined>
         <div slot="header" class="panel-header">
           <div class="panel-heading">
-            <span class="panel-title">${htmlEscape(CHIP_DEFINITIONS[chip.type]?.label || chip.type)}</span>
+            <span class="panel-title">${htmlEscape((isCustom && chip.name) || CHIP_DEFINITIONS[chip.type]?.label || chip.type)}</span>
             <span class="secondary">${chip.entity_ids.length} ${chip.entity_ids.length === 1 ? "entity" : "entities"}</span>
           </div>
           ${this.renderChipPreview(chip)}
         </div>
         <div class="panel-content">
           <div class="toolbar">
+            ${isCustom ? "" : `
             <ha-button appearance="filled" size="s" data-action="add-all-entities" data-chip-index="${chipIndex}" ${unselectedCount === 0 ? "disabled" : ""}>
               <ha-icon icon="mdi:playlist-plus" slot="start"></ha-icon>
               Add all entities${unselectedCount > 0 ? ` (${unselectedCount})` : ""}
-            </ha-button>
+            </ha-button>`}
             <span class="toolbar-spacer"></span>
             <ha-icon-button
               label="Move up"
@@ -4182,13 +4387,21 @@ class AdvancedAreaCardEditor extends HTMLElement {
 
       this._config.chips.forEach((chip, i) => {
         this._setupForm(`chip-${i}-form`, chip, this._getChipSchema(chip), (data) => {
-          const prevUseLightColor = this._config.chips[i].use_light_color;
-          Object.assign(this._config.chips[i], data);
-          this.emitConfig();
+          const target = this._config.chips[i];
+          const prevUseLightColor = target.use_light_color;
+          const prevCustomKey = target.type === "custom" ? this._customChipKey(target) : "";
+          Object.assign(target, data);
           // Re-render when the toggle flips so the color picker appears/disappears.
-          if (data.use_light_color !== undefined && data.use_light_color !== prevUseLightColor) this.render();
+          let rebuild = data.use_light_color !== undefined && data.use_light_color !== prevUseLightColor;
+          if (target.type === "custom") {
+            this._coerceCustomChipValue(target);
+            // Mode / condition / entity changes alter which fields apply.
+            if (this._customChipKey(target) !== prevCustomKey) rebuild = true;
+          }
+          this.emitConfig();
+          if (rebuild) this.render();
         });
-        if ((chip.type === "music") || (chip.type === "lights" && !chip.use_light_color)) {
+        if ((chip.type === "custom") || (chip.type === "music") || (chip.type === "lights" && !chip.use_light_color)) {
           const def = CHIP_DEFINITIONS[chip.type]?.activeColor || "#43b581";
           this._setupColorPicker(`chip-${i}-color`, chip.active_color, def, (value) => {
             this._config.chips[i].active_color = value;
@@ -4197,25 +4410,32 @@ class AdvancedAreaCardEditor extends HTMLElement {
         }
         if (Array.isArray(chip.thresholds)) {
           chip.thresholds.forEach((threshold, ti) => {
-            this._setupColorPicker(
-              `chip-${i}-threshold-${ti}-color`,
-              threshold.color,
-              "#43b581",
-              (value) => {
-                this._config.chips[i].thresholds[ti].color = value;
-                this.emitConfig();
-              },
-            );
+            // Value and color side by side, icon below; the CSS grid keeps
+            // the spacing equal and wraps on narrow screens. Each field only
+            // writes its own property.
             this._setupForm(
               `chip-${i}-threshold-${ti}-value`,
               { value: threshold.value },
               [{ name: "value", selector: { number: { mode: "box", step: 0.1 } } }],
               (data) => {
-                const entry = this._config.chips[i].thresholds[ti];
-                entry.value = parseNumber(data.value) ?? 0;
-                this._config.chips[i].thresholds = [...this._config.chips[i].thresholds].sort((a, b) => a.value - b.value);
+                // No sorting or re-render while typing (that would drop the
+                // field's focus and make the row jump); the "Sort by value"
+                // button applies the order. An empty field keeps the last
+                // valid number.
+                const numeric = parseNumber(data.value);
+                if (numeric === null) return;
+                this._config.chips[i].thresholds[ti].value = numeric;
                 this.emitConfig();
-                this.render();
+                this._markThresholdOrder(i);
+              },
+            );
+            this._setupForm(
+              `chip-${i}-threshold-${ti}-color`,
+              { color: threshold.color || "" },
+              [{ name: "color", selector: { ui_color: { include_state: true, include_none: true, default_color: "#43b581" } } }],
+              (data) => {
+                this._config.chips[i].thresholds[ti].color = data.color || "";
+                this.emitConfig();
               },
             );
             this._setupForm(
@@ -4228,6 +4448,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
               },
             );
           });
+          this._markThresholdOrder(i);
         }
         this._setupForm(`chip-${i}-tap-form`, chip.tap_action || { action: "none" }, this._getActionSchema(chip.tap_action), (data) => {
           const prev = this._config.chips[i].tap_action?.action;
@@ -4838,18 +5059,42 @@ class AdvancedAreaCardEditor extends HTMLElement {
         display: flex;
         align-items: center;
         gap: 8px;
+        border-left: 3px solid transparent;
+        padding-left: 6px;
       }
-      .threshold-row .threshold-value-form {
-        flex: 1 1 0;
-        min-width: 70px;
+      .threshold-row--unsorted {
+        border-left-color: var(--warning-color, #ff9800);
       }
-      .threshold-row .color-form {
-        flex: 1 1 0;
-        min-width: 80px;
+      .threshold-hint {
+        display: none;
+        flex: 1 1 auto;
+        font-size: 12px;
+        color: var(--warning-color, #ff9800);
       }
-      .threshold-row .threshold-icon-form {
-        flex: 1 1 0;
-        min-width: 80px;
+      .threshold-sort {
+        display: none;
+      }
+      .threshold-section--unsorted .threshold-hint {
+        display: block;
+      }
+      .threshold-section--unsorted .threshold-sort {
+        display: inline-flex;
+      }
+      .threshold-row + .threshold-row {
+        margin-top: 12px;
+      }
+      .threshold-fields {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+      }
+      .threshold-fields .threshold-icon {
+        grid-column: 1 / -1;
+      }
+      .threshold-row ha-icon-button {
+        flex: 0 0 auto;
       }
       .override-panel {
         margin-bottom: 8px;
@@ -5126,7 +5371,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
     }
     if (action === "add-chip") {
       const type = button.dataset.type;
-      if (type && !this._config.chips.some((c) => c.type === type)) {
+      if (type && CHIP_DEFINITIONS[type] && (type === "custom" || !this._config.chips.some((c) => c.type === type))) {
         this._config.chips = [...this._config.chips, createDefaultChip(type)];
         this.emitConfig();
         this.render();
@@ -5153,6 +5398,14 @@ class AdvancedAreaCardEditor extends HTMLElement {
       if (!chip || !this._hass || !this._registry || !areaIds.length) return;
       const candidates = getChipCandidates(this._hass, this._registry, areaIds, chip.type);
       chip.entity_ids = unique([...(chip.entity_ids || []), ...candidates]);
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "sort-thresholds") {
+      const chip = this._config.chips[Number(button.dataset.chipIndex)];
+      if (!chip || !Array.isArray(chip.thresholds)) return;
+      chip.thresholds = [...chip.thresholds].sort((a, b) => a.value - b.value);
       this.emitConfig();
       this.render();
       return;
