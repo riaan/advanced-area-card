@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.0]
+
 ### Added
 
 - **Custom chips** (`type: custom`): a chip for any entities, in or outside the area, that shows either a number (average, sum, minimum, maximum or first of the states or an attribute, with decimals, unit, threshold colours and icons) or a count of entities matching a condition. You can add as many as you like; the editor offers an "Add custom chip" button with attribute and value pickers that follow the selected entity.
