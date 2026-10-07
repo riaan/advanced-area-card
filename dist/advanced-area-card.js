@@ -394,6 +394,14 @@ function normalizeConfig(inputConfig) {
   return config;
 }
 
+function fetchRegistryData(hass) {
+  return Promise.all([
+    hass.callWS({ type: "config/area_registry/list" }),
+    hass.callWS({ type: "config/device_registry/list" }),
+    hass.callWS({ type: "config/entity_registry/list" }),
+  ]).then(([areas, devices, entities]) => ({ areas, devices, entities }));
+}
+
 async function ensureRegistry(hass) {
   if (!hass || !hass.callWS) {
     return { areas: [], devices: [], entities: [] };
@@ -404,13 +412,8 @@ async function ensureRegistry(hass) {
   if (registryCache.promise) {
     return registryCache.promise;
   }
-  registryCache.promise = Promise.all([
-    hass.callWS({ type: "config/area_registry/list" }),
-    hass.callWS({ type: "config/device_registry/list" }),
-    hass.callWS({ type: "config/entity_registry/list" }),
-  ])
-    .then(([areas, devices, entities]) => {
-      const data = { areas, devices, entities };
+  registryCache.promise = fetchRegistryData(hass)
+    .then((data) => {
       registryCache.data = data;
       return data;
     })
@@ -424,6 +427,94 @@ async function ensureRegistry(hass) {
       registryCache.promise = null;
     });
   return registryCache.promise;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Registry freshness: one shared subscription for all card / editor
+// instances. Subscribes while at least one instance is attached, reloads the
+// registry (debounced) when areas, devices or entities change, and tells the
+// instances only when the data actually differs.
+// ─────────────────────────────────────────────────────────────────────────
+const REGISTRY_EVENTS = ["area_registry_updated", "device_registry_updated", "entity_registry_updated"];
+const REGISTRY_REFRESH_DELAY_MS = 1000;
+const registryWatch = {
+  listeners: new Set(),
+  hass: null,
+  subscribing: false,
+  unsubscribe: null,
+  timer: null,
+};
+
+function scheduleRegistryRefresh() {
+  clearTimeout(registryWatch.timer);
+  registryWatch.timer = setTimeout(refreshRegistry, REGISTRY_REFRESH_DELAY_MS);
+}
+
+async function refreshRegistry() {
+  registryWatch.timer = null;
+  const hass = registryWatch.hass;
+  if (!hass?.callWS || registryWatch.listeners.size === 0) return;
+  let next;
+  try {
+    next = await fetchRegistryData(hass);
+  } catch (error) {
+    // Keep the data we have; the next change event tries again.
+    console.warn("advanced-area-card: failed to refresh registry", error);
+    return;
+  }
+  if (registryWatch.listeners.size === 0) return;
+  const prev = registryCache.data;
+  if (prev && JSON.stringify(prev) === JSON.stringify(next)) return;
+  registryCache.data = next;
+  for (const listener of [...registryWatch.listeners]) listener(next);
+}
+
+function startRegistryWatch(hass) {
+  const connection = hass?.connection;
+  if (!connection || typeof connection.subscribeEvents !== "function") return;
+  registryWatch.subscribing = true;
+  Promise.allSettled(REGISTRY_EVENTS.map((type) => connection.subscribeEvents(scheduleRegistryRefresh, type)))
+    .then((results) => {
+      registryWatch.subscribing = false;
+      const unsubs = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+      const release = () => {
+        for (const unsub of unsubs) {
+          try { Promise.resolve(unsub()).catch(() => {}); } catch (_error) { /* connection already closed */ }
+        }
+        if (typeof connection.removeEventListener === "function") {
+          connection.removeEventListener("ready", scheduleRegistryRefresh);
+        }
+      };
+      if (registryWatch.listeners.size === 0) {
+        release();
+        return;
+      }
+      // After a websocket reconnect, events may have been missed: reload.
+      if (typeof connection.addEventListener === "function") {
+        connection.addEventListener("ready", scheduleRegistryRefresh);
+      }
+      registryWatch.unsubscribe = release;
+    });
+}
+
+function stopRegistryWatch() {
+  clearTimeout(registryWatch.timer);
+  registryWatch.timer = null;
+  if (registryWatch.unsubscribe) {
+    registryWatch.unsubscribe();
+    registryWatch.unsubscribe = null;
+  }
+}
+
+// Returns a function that stops watching. Safe to call more than once.
+function watchRegistry(hass, listener) {
+  registryWatch.listeners.add(listener);
+  registryWatch.hass = hass;
+  if (!registryWatch.unsubscribe && !registryWatch.subscribing) startRegistryWatch(hass);
+  return () => {
+    registryWatch.listeners.delete(listener);
+    if (registryWatch.listeners.size === 0) stopRegistryWatch();
+  };
 }
 
 function getAreaName(area) {
@@ -1843,6 +1934,7 @@ class AdvancedAreaCard extends HTMLElement {
     this._timeTickerId = null;
     this._registryLoading = false;
     this._registryRetryTimer = null;
+    this._unwatchRegistry = null;
     this._stateCount = { ref: null, n: 0 }; // memoised key count of hass.states
     // Event delegation: single set of listeners on the shadow root.
     this._modelIndex = new Map();      // "kind:id" -> modelItem
@@ -1876,12 +1968,33 @@ class AdvancedAreaCard extends HTMLElement {
       clearTimeout(this._registryRetryTimer);
       this._registryRetryTimer = null;
     }
+    this._stopRegistryWatch();
     // A press in progress must not fire its hold action after the card left
     // the DOM.
     this.shadowRoot.querySelectorAll("[data-interactive]").forEach((element) => {
       const state = activeActionMap.get(element);
       if (state) clearTimeout(state.timer);
     });
+  }
+
+  // Follow registry changes (renamed areas, moved devices, ...) while the
+  // card is attached; the subscription is shared between all instances.
+  _startRegistryWatch() {
+    if (this._unwatchRegistry || !this._hass || !this.isConnected) return;
+    this._unwatchRegistry = watchRegistry(this._hass, (registry) => {
+      this._registry = registry;
+      this._watchedAreaKey = null;
+      this._watchedAreaEntities = null;
+      this._areaEntityIdsArray = null;
+      this.render();
+    });
+  }
+
+  _stopRegistryWatch() {
+    if (this._unwatchRegistry) {
+      this._unwatchRegistry();
+      this._unwatchRegistry = null;
+    }
   }
 
   // Load the registry once; concurrent callers share the in-flight load and
@@ -1948,6 +2061,7 @@ class AdvancedAreaCard extends HTMLElement {
   set hass(hass) {
     const prevHass = this._hass;
     this._hass = hass;
+    this._startRegistryWatch();
     if (!this._registry) {
       // Kick off registry load (one-time). First paint happens below.
       this._loadRegistry();
@@ -2213,6 +2327,7 @@ class AdvancedAreaCard extends HTMLElement {
     // re-arm them, otherwise those indicators stay stuck until a watched
     // entity changes.
     this._updateTimeTicker();
+    this._startRegistryWatch();
     if (this._config && this._hass) {
       this._refreshTrueSince(null);
       this._loadRegistry();
@@ -2867,6 +2982,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._indicatorShowAll = false;
     this._boundClick = this.handleClick.bind(this);
     this._emittedJsons = [];
+    this._unwatchRegistry = null;
   }
 
   connectedCallback() {
@@ -2874,6 +2990,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       this._listenersBound = true;
       this.shadowRoot.addEventListener("click", this._boundClick);
     }
+    this._startRegistryWatch();
     this.render();
   }
 
@@ -2893,6 +3010,10 @@ class AdvancedAreaCardEditor extends HTMLElement {
     if (this._previewTimer !== null) {
       clearTimeout(this._previewTimer);
       this._previewTimer = null;
+    }
+    if (this._unwatchRegistry) {
+      this._unwatchRegistry();
+      this._unwatchRegistry = null;
     }
     // Release references for GC; they'll be repopulated on reconnect.
     // `_registry` is kept together with `_registryLoaded` (it is the shared
@@ -2936,6 +3057,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._startRegistryWatch();
     if (!this._registryLoaded) {
       this.render();
       this._loadRegistry();
@@ -2949,6 +3071,15 @@ class AdvancedAreaCardEditor extends HTMLElement {
         this._refreshIndicatorPreviews();
       }, EDITOR_PREVIEW_THROTTLE_MS);
     }
+  }
+
+  _startRegistryWatch() {
+    if (this._unwatchRegistry || !this._hass || !this.isConnected) return;
+    this._unwatchRegistry = watchRegistry(this._hass, (registry) => {
+      this._registry = registry;
+      this._registryLoaded = true;
+      this.render();
+    });
   }
 
   _loadRegistry() {
