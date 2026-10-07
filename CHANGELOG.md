@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- A chip or indicator whose tap or hold action is "None" now uses the card's tap or hold action for that gesture instead of doing nothing (the editor shows a hint). Tap and hold are handled separately. Note that a card hold action now also runs when you hold a chip or indicator that has no hold action of its own.
+- Tap and hold actions use Home Assistant's own action editor (the same one as built-in cards): more-info, toggle, navigate, URL, perform action (with target and data), assist and none. For `more-info` and `toggle` an optional entity can be chosen; by default they use the chip's or indicator's first entity.
+- Actions are now run by Home Assistant's action handler (`hass-action`), so confirmations, service targets and data behave exactly like on built-in cards.
+- Older configs keep working: `call-service` with `service`, `service_data` and `entity_id` is converted to `perform-action` with `perform_action`, `data` and `target`, and `entity_id` on `more-info` / `toggle` to `entity`. Service calls without a target no longer get the chip's entity added automatically; set a target when the service needs one.
+
 ## [1.3.0]
 
 ### Changed
