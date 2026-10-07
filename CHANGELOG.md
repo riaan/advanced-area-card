@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.3.0]
+
 ### Changed
 
 - The card and editor follow changes in the area, device and entity registries (renaming an area, moving a device or entity to another area, new entities) without a page reload. One shared subscription serves all cards, is only active while a card or editor is on the page, and reloads the registries after a short delay; nothing re-renders when the data did not actually change.
