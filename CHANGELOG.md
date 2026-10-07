@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.0]
+
 ### Changed
 
 - A chip or indicator whose tap or hold action is "None" now uses the card's tap or hold action for that gesture instead of doing nothing (the editor shows a hint). Tap and hold are handled separately. Note that a card hold action now also runs when you hold a chip or indicator that has no hold action of its own.
