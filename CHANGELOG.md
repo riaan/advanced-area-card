@@ -5,8 +5,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Custom chips** (`type: custom`): a chip for any entities, in or outside the area, that shows either a number (average, sum, minimum, maximum or first of the states or an attribute, with decimals, unit, threshold colours and icons) or a count of entities matching a condition. You can add as many as you like; the editor offers an "Add custom chip" button with attribute and value pickers that follow the selected entity.
+
+### Fixed
+
+- Editor: typing a threshold value keeps the focus. Rows no longer re-sort or jump while you type; out-of-order rows are marked and a "Sort by value" button applies the sort when you want it. The editor also no longer swaps its config for a re-sorted copy after every change, which could make a field edit the wrong row. A late echo from Home Assistant is now recognised too, so it no longer re-sorts the table and re-renders the editor in the middle of typing.
+
 ### Changed
 
+- Editor: threshold rows show value and color side by side with the icon below, equally spaced, and with more space between rows, so the fields have room and it is clear which belong together.
 - Editor: every color field uses Home Assistant's color selector (theme colors, state color, none) through the standard form instead of a bare `ha-color-picker` element.
 - Editor: the `attribute` field of rules and display overrides is a picker listing the real attributes of the selected entity (free text until an entity is chosen).
 - Editor: for text rules with `equals`, `not equals`, `is one of` and `is not one of`, the value is picked from the entity's actual states (custom values still allowed); `is one of` is a multi-select instead of comma-separated text. `is truthy` / `is falsy` no longer show a value field.
