@@ -47,7 +47,7 @@ Edit dashboard → **Add card** → search **Advanced Area**. Pick one or more a
 - Area **icon and name** taken from the area registry. Override either with `icon` / `title`.
 - **Multiple areas** in one card (`areas`): chips and indicators combine all selected areas, the name and icon come from the first one unless overridden.
 - `icon_style`: `plain` or `boxed`.
-- Card-level `tap_action` and `hold_action` (`more-info`, `navigate`, `url`, `toggle`, `call-service`, `assist`, `none`).
+- Card-level `tap_action` and `hold_action` (`more-info`, `toggle`, `navigate`, `url`, `perform-action`, `assist`, `none`), edited with Home Assistant's own action editor and run by Home Assistant's action handler, so confirmations and service targets work like on built-in cards.
 
 ### Summary chips
 
@@ -93,7 +93,7 @@ Per chip you can:
 
 - reorder it and override its **icon**;
 - choose between **all matching entities in the area** and a **custom entity list** (`use_custom_entities`, `entity_ids`);
-- set **tap** and **hold** actions (default: more-info);
+- set **tap** and **hold** actions (default: more-info). `more-info` and `toggle` act on the chip's first entity unless you pick another one. If a chip's action is `none`, the **card's** tap / hold action is used instead (tap and hold separately);
 - **hide it when zero** (lights, music, lux — `hidden_when_zero`);
 - override the **active / inactive colours** (lights, music);
 - edit the **threshold table** (value → colour → optional icon) for temperature, humidity and lux. Sensible defaults are built in.

@@ -343,6 +343,35 @@ function normalizeStyling(input) {
   return styling;
 }
 
+const ENTITY_ACTIONS = ["more-info", "toggle"];
+
+// Actions are stored in Home Assistant's own action format. Older versions
+// of this card stored `call-service` with `service`, `service_data` and
+// `entity_id`; convert those so the native action editor and HA's action
+// handler understand them.
+function normalizeAction(action) {
+  if (!action || typeof action !== "object") return action;
+  const next = { ...action };
+  if (next.action === "call-service") next.action = "perform-action";
+  if (next.service !== undefined) {
+    if (next.perform_action === undefined) next.perform_action = next.service;
+    delete next.service;
+  }
+  if (next.service_data !== undefined) {
+    if (next.data === undefined) next.data = next.service_data;
+    delete next.service_data;
+  }
+  if (next.entity_id !== undefined) {
+    if (ENTITY_ACTIONS.includes(next.action)) {
+      if (next.entity === undefined) next.entity = next.entity_id;
+    } else if (next.action === "perform-action" && !next.target) {
+      next.target = { entity_id: next.entity_id };
+    }
+    delete next.entity_id;
+  }
+  return next;
+}
+
 function normalizeConfig(inputConfig) {
   const config = clone(inputConfig || {});
   if (config.type !== DEFAULT_CARD_TYPE) {
@@ -364,10 +393,10 @@ function normalizeConfig(inputConfig) {
   config.icon = config.icon || "";
   config.icon_style = ["plain", "boxed"].includes(config.icon_style) ? config.icon_style : "plain";
   config.tap_action = config.tap_action && typeof config.tap_action === "object"
-    ? config.tap_action
+    ? normalizeAction(config.tap_action)
     : { action: "none" };
   config.hold_action = config.hold_action && typeof config.hold_action === "object"
-    ? config.hold_action
+    ? normalizeAction(config.hold_action)
     : { action: "none" };
   config.chips = Array.isArray(config.chips) ? config.chips.map((chip) => ({
     ...createDefaultChip(chip.type || "lights"),
@@ -384,8 +413,8 @@ function normalizeConfig(inputConfig) {
         }))
       : (DEFAULT_THRESHOLDS[chip.type] || []).map((t) => ({ ...t }))
     ).sort((a, b) => a.value - b.value),
-    tap_action: chip.tap_action || { action: "more-info" },
-    hold_action: chip.hold_action || { action: "none" },
+    tap_action: normalizeAction(chip.tap_action) || { action: "more-info" },
+    hold_action: normalizeAction(chip.hold_action) || { action: "none" },
   })) : [];
   config.activity_indicators = Array.isArray(config.activity_indicators)
     ? config.activity_indicators.map((indicator) => normalizeIndicator(indicator))
@@ -1632,10 +1661,10 @@ function normalizeIndicator(raw) {
     and_if: andIf,
     display,
     tap_action: source.tap_action && typeof source.tap_action === "object"
-      ? source.tap_action
+      ? normalizeAction(source.tap_action)
       : { action: "more-info" },
     hold_action: source.hold_action && typeof source.hold_action === "object"
-      ? source.hold_action
+      ? normalizeAction(source.hold_action)
       : { action: "none" },
     for_duration: parseNumber(source.for_duration) ?? 0,
     // Informational only — lets the editor show the "preset" that was used
@@ -1888,14 +1917,6 @@ function getAllIndicatorCandidates(hass) {
     }),
     (entityId) => getEntityLabel(hass, entityId)
   );
-}
-
-function performNavigation(path) {
-  if (!path) {
-    return;
-  }
-  history.pushState(null, "", path);
-  fireEvent(window, "location-changed", { replace: false });
 }
 
 class AdvancedAreaCard extends HTMLElement {
@@ -2532,6 +2553,23 @@ class AdvancedAreaCard extends HTMLElement {
     });
   }
 
+  // Runs the tap or hold action of a chip / indicator / the card. A chip or
+  // indicator whose action is "none" has no action of its own, so the press
+  // goes to the card's action for the same gesture (like a click that
+  // bubbles up to the card).
+  _runGesture(cfg, gesture) {
+    const isNone = (action) => !action || !action.action || action.action === "none";
+    const own = cfg[gesture];
+    if (!isNone(own)) {
+      this.handleAction(own, cfg.entityIds?.[0] || cfg.entityId);
+      return;
+    }
+    const cardCfg = this._modelIndex.get("card:");
+    if (cardCfg && cardCfg !== cfg && !isNone(cardCfg[gesture])) {
+      this.handleAction(cardCfg[gesture]);
+    }
+  }
+
   // Attach one set of pointer listeners to the shadow root; they dispatch
   // to the interactive element found by walking the composed path. Runs
   // once per card lifetime — no per-render closure allocation.
@@ -2560,7 +2598,7 @@ class AdvancedAreaCard extends HTMLElement {
       clearTimeout(state.timer);
       state.timer = window.setTimeout(() => {
         state.held = true;
-        this.handleAction(cfg.hold_action, cfg.entityIds?.[0] || cfg.entityId);
+        this._runGesture(cfg, "hold_action");
       }, ACTION_HOLD_DELAY);
       activeActionMap.set(element, state);
     });
@@ -2575,7 +2613,7 @@ class AdvancedAreaCard extends HTMLElement {
       if (!state) return;
       clearTimeout(state.timer);
       if (!state.held && !state.cancelled) {
-        this.handleAction(cfg.tap_action, cfg.entityIds?.[0] || cfg.entityId);
+        this._runGesture(cfg, "tap_action");
       }
       state.cancelled = false;
     });
@@ -2601,7 +2639,7 @@ class AdvancedAreaCard extends HTMLElement {
       const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
       if (!cfg) return;
       event.stopPropagation();
-      this.handleAction(cfg.tap_action, cfg.entityIds?.[0] || cfg.entityId);
+      this._runGesture(cfg, "tap_action");
     });
     root.addEventListener("contextmenu", (event) => {
       if (findTarget(event)) event.preventDefault();
@@ -2915,51 +2953,19 @@ class AdvancedAreaCard extends HTMLElement {
     return css;
   }
 
+  // Runs the action through Home Assistant's own action handler (the
+  // documented `hass-action` event), so every action type, targets and
+  // data, confirmations and the assist dialog behave exactly like they do
+  // on built-in cards.
   handleAction(actionConfig, fallbackEntityId) {
-    const action = actionConfig?.action || "none";
-    if (!this._hass || action === "none") {
+    const action = normalizeAction(actionConfig);
+    if (!this._hass || !action?.action || action.action === "none") {
       return;
     }
-    if (action === "more-info") {
-      fireEvent(this, "hass-more-info", {
-        entityId: actionConfig?.entity_id || fallbackEntityId,
-      });
-      return;
-    }
-    if (action === "navigate") {
-      performNavigation(actionConfig?.navigation_path);
-      return;
-    }
-    if (action === "url") {
-      if (actionConfig?.url_path) {
-        window.open(actionConfig.url_path, "_blank");
-      }
-      return;
-    }
-    if (action === "toggle") {
-      const entityId = actionConfig?.entity_id || fallbackEntityId;
-      if (entityId) {
-        this._hass.callService("homeassistant", "toggle", { entity_id: entityId });
-      }
-      return;
-    }
-    if (action === "assist") {
-      fireEvent(this, "hass-assist", {});
-      return;
-    }
-    if (action === "call-service" || action === "perform-action") {
-      const serviceString = actionConfig?.service || actionConfig?.perform_action || "";
-      const [domain, service] = serviceString.split(".");
-      if (domain && service) {
-        const serviceData = {
-          ...(actionConfig?.data || actionConfig?.service_data || {}),
-        };
-        if (!serviceData.entity_id && (actionConfig?.entity_id || fallbackEntityId)) {
-          serviceData.entity_id = actionConfig?.entity_id || fallbackEntityId;
-        }
-        this._hass.callService(domain, service, serviceData);
-      }
-    }
+    // More-info and toggle act on the chip's / indicator's own entity unless
+    // the action names another one.
+    const entity = action.entity || fallbackEntityId;
+    fireEvent(this, "hass-action", { config: { entity, tap_action: action }, action: "tap" });
   }
 }
 
@@ -3276,6 +3282,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       active_color: "Active color",
       entity_id: "Entity",
       add_entity: "Select an entity to add",
+      entity: "Entity (optional, default: the first entity)",
       mode: "Show",
       count_operator: "Count entities whose value",
       count_value: "Value",
@@ -3763,33 +3770,43 @@ class AdvancedAreaCardEditor extends HTMLElement {
     ];
   }
 
-  _getActionSchema(actionConfig) {
-    const action = actionConfig?.action || "none";
-    const schema = [
-      { name: "action", selector: { select: { mode: "dropdown", options: [
-        { value: "none", label: "None" },
-        { value: "more-info", label: "More info" },
-        { value: "navigate", label: "Navigate" },
-        { value: "url", label: "Open URL" },
-        { value: "toggle", label: "Toggle" },
-        { value: "call-service", label: "Call service" },
-        { value: "assist", label: "Assist" },
-      ] } } },
-    ];
-    if (["more-info", "toggle", "call-service"].includes(action)) {
-      schema.push({ name: "entity_id", selector: { entity: {} } });
-    }
-    if (action === "navigate") {
-      schema.push({ name: "navigation_path", selector: { text: {} } });
-    }
-    if (action === "url") {
-      schema.push({ name: "url_path", selector: { text: {} } });
-    }
-    if (action === "call-service") {
-      schema.push({ name: "service", selector: { text: {} } });
-      schema.push({ name: "service_data", selector: { object: {} } });
-    }
-    return schema;
+  // Markup for one action field: HA's native action editor, plus an
+  // optional entity picker for the actions that act on an entity but have no
+  // field for it in the native editor.
+  // `gesture` ("tap_action" / "hold_action") is only given for chips and
+  // indicators: with action "none" they use the card's action, which gets a
+  // hint when the card has one.
+  _actionFormMarkup(id, action, gesture) {
+    const needsEntity = ENTITY_ACTIONS.includes(action?.action);
+    const cardAction = gesture ? this._config?.[gesture]?.action : "";
+    const inherits = gesture && (!action?.action || action.action === "none")
+      && cardAction && cardAction !== "none";
+    return `<ha-form id="${id}"></ha-form>${needsEntity ? `<ha-form id="${id}-entity"></ha-form>` : ""}${
+      inherits ? `<span class="secondary">None: the card's ${gesture === "tap_action" ? "tap" : "hold"} action is used.</span>` : ""
+    }`;
+  }
+
+  // Wires an action field to HA's `ui_action` selector (the same editor the
+  // built-in cards use). `getAction` / `setAction` read and store the
+  // action object; the editor rebuilds when the action type changes.
+  _setupActionForm(id, getAction, setAction) {
+    this._setupForm(id, { action: getAction() }, [{ name: "action", selector: { ui_action: {} } }], (data) => {
+      const prev = getAction();
+      let next = data.action || { action: "none" };
+      // Keep a chosen entity when switching between more-info and toggle
+      // (the native editor drops keys it does not know).
+      if (ENTITY_ACTIONS.includes(next.action) && ENTITY_ACTIONS.includes(prev?.action)
+        && prev.entity && !next.entity) {
+        next = { ...next, entity: prev.entity };
+      }
+      setAction(next);
+      if (prev?.action !== next.action) this.render();
+    });
+    this._setupForm(`${id}-entity`, { entity: getAction()?.entity || "" }, [{ name: "entity", selector: { entity: {} } }], (data) => {
+      const next = { ...getAction() };
+      if (data.entity) next.entity = data.entity; else delete next.entity;
+      setAction(next);
+    });
   }
 
   _setupForm(id, data, schema, onChange) {
@@ -4054,11 +4071,11 @@ class AdvancedAreaCardEditor extends HTMLElement {
           ${this.renderThresholdRows(chip, chipIndex)}
           <div class="action-section">
             <span class="section-label">Tap action</span>
-            <ha-form id="chip-${chipIndex}-tap-form"></ha-form>
+            ${this._actionFormMarkup(`chip-${chipIndex}-tap-form`, chip.tap_action, "tap_action")}
           </div>
           <div class="action-section">
             <span class="section-label">Hold action</span>
-            <ha-form id="chip-${chipIndex}-hold-form"></ha-form>
+            ${this._actionFormMarkup(`chip-${chipIndex}-hold-form`, chip.hold_action, "hold_action")}
           </div>
         </div>
       </ha-expansion-panel>
@@ -4195,11 +4212,11 @@ class AdvancedAreaCardEditor extends HTMLElement {
 
           <div class="action-section">
             <span class="section-label">Tap action</span>
-            <ha-form id="indicator-${indicatorIndex}-tap-form"></ha-form>
+            ${this._actionFormMarkup(`indicator-${indicatorIndex}-tap-form`, indicator.tap_action, "tap_action")}
           </div>
           <div class="action-section">
             <span class="section-label">Hold action</span>
-            <ha-form id="indicator-${indicatorIndex}-hold-form"></ha-form>
+            ${this._actionFormMarkup(`indicator-${indicatorIndex}-hold-form`, indicator.hold_action, "hold_action")}
           </div>
         </div>
       </ha-expansion-panel>
@@ -4331,11 +4348,11 @@ class AdvancedAreaCardEditor extends HTMLElement {
             <div class="panel-content">
               <div class="action-section">
                 <span class="section-label">Tap action</span>
-                <ha-form id="card-tap-form"></ha-form>
+                ${this._actionFormMarkup("card-tap-form", this._config.tap_action)}
               </div>
               <div class="action-section">
                 <span class="section-label">Hold action</span>
-                <ha-form id="card-hold-form"></ha-form>
+                ${this._actionFormMarkup("card-hold-form", this._config.hold_action)}
               </div>
             </div>
           </ha-expansion-panel>
@@ -4494,27 +4511,13 @@ class AdvancedAreaCardEditor extends HTMLElement {
         },
       );
 
-      this._setupForm("card-tap-form",
-        this._config.tap_action || { action: "none" },
-        this._getActionSchema(this._config.tap_action),
-        (data) => {
-          const prev = this._config.tap_action?.action;
-          this._config.tap_action = { ...this._config.tap_action, ...data };
+      for (const kind of ["tap", "hold"]) {
+        const key = `${kind}_action`;
+        this._setupActionForm(`card-${kind}-form`, () => this._config[key], (next) => {
+          this._config[key] = next;
           this.emitConfig();
-          if (prev !== data.action) this.render();
-        },
-      );
-
-      this._setupForm("card-hold-form",
-        this._config.hold_action || { action: "none" },
-        this._getActionSchema(this._config.hold_action),
-        (data) => {
-          const prev = this._config.hold_action?.action;
-          this._config.hold_action = { ...this._config.hold_action, ...data };
-          this.emitConfig();
-          if (prev !== data.action) this.render();
-        },
-      );
+        });
+      }
 
       this._config.chips.forEach((chip, i) => {
         this._setupForm(`chip-${i}-form`, chip, this._getChipSchema(chip), (data) => {
@@ -4581,17 +4584,13 @@ class AdvancedAreaCardEditor extends HTMLElement {
           });
           this._markThresholdOrder(i);
         }
-        this._setupForm(`chip-${i}-tap-form`, chip.tap_action || { action: "none" }, this._getActionSchema(chip.tap_action), (data) => {
-          const prev = this._config.chips[i].tap_action?.action;
-          this._config.chips[i].tap_action = { ...this._config.chips[i].tap_action, ...data };
+        this._setupActionForm(`chip-${i}-tap-form`, () => this._config.chips[i].tap_action, (next) => {
+          this._config.chips[i].tap_action = next;
           this.emitConfig();
-          if (prev !== data.action) this.render();
         });
-        this._setupForm(`chip-${i}-hold-form`, chip.hold_action || { action: "none" }, this._getActionSchema(chip.hold_action), (data) => {
-          const prev = this._config.chips[i].hold_action?.action;
-          this._config.chips[i].hold_action = { ...this._config.chips[i].hold_action, ...data };
+        this._setupActionForm(`chip-${i}-hold-form`, () => this._config.chips[i].hold_action, (next) => {
+          this._config.chips[i].hold_action = next;
           this.emitConfig();
-          if (prev !== data.action) this.render();
         });
       });
 
@@ -4616,7 +4615,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
             when: defaults.when,
             and_if: [],
             display: defaults.display,
-            tap_action: { action: "more-info", entity_id: entityId },
+            tap_action: { action: "more-info", entity: entityId },
             hold_action: { action: "none" },
             for_duration: 0,
             role: detectIndicatorRole(entityId, stateObj) || "movement",
@@ -4841,17 +4840,13 @@ class AdvancedAreaCardEditor extends HTMLElement {
           this.emitConfig();
         });
 
-        this._setupForm(`indicator-${i}-tap-form`, indicator.tap_action || { action: "none" }, this._getActionSchema(indicator.tap_action), (data) => {
-          const prev = this._config.activity_indicators[i].tap_action?.action;
-          this._config.activity_indicators[i].tap_action = { ...this._config.activity_indicators[i].tap_action, ...data };
+        this._setupActionForm(`indicator-${i}-tap-form`, () => this._config.activity_indicators[i].tap_action, (next) => {
+          this._config.activity_indicators[i].tap_action = next;
           this.emitConfig();
-          if (prev !== data.action) this.render();
         });
-        this._setupForm(`indicator-${i}-hold-form`, indicator.hold_action || { action: "none" }, this._getActionSchema(indicator.hold_action), (data) => {
-          const prev = this._config.activity_indicators[i].hold_action?.action;
-          this._config.activity_indicators[i].hold_action = { ...this._config.activity_indicators[i].hold_action, ...data };
+        this._setupActionForm(`indicator-${i}-hold-form`, () => this._config.activity_indicators[i].hold_action, (next) => {
+          this._config.activity_indicators[i].hold_action = next;
           this.emitConfig();
-          if (prev !== data.action) this.render();
         });
       });
     }
