@@ -5,6 +5,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Editor: the "add indicator" picker only offered motion, window, door, fan, heating and cooling entities, so lights, switches, media players, cameras, vacuums, covers, locks, persons, weather, sensors and most binary sensors could not be added even though they have ready-made indicator defaults. It now offers every entity of those types in the card's areas, and **Show all entities** lists every Home Assistant entity.
+
+### Changed
+
+- Editor: every entity picker (chip entities, custom chips, the "add indicator" picker, entities in indicator rules and extra conditions, display overrides, and the entity of a More info / Toggle action) now offers the entities of the card's areas by default, plus anything already selected. Each picker has its own **Show all entities** switch to list every Home Assistant entity (chip pickers still only list entities that fit the chip type). The switch replaces the checkbox of the "add indicator" picker and is not saved in the card config.
+- Documentation: the README is rewritten as one page for Home Assistant users: what the card does, getting started, chips (including custom chips), indicators, actions (including the "None uses the card's action" rule), Sections and accessibility support, a reference of card, chip and indicator options, and troubleshooting.
+
 ## [1.4.0]
 
 ### Changed
