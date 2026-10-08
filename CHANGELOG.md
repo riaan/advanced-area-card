@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.5.0]
+
 ### Fixed
 
 - Editor: the "add indicator" picker only offered motion, window, door, fan, heating and cooling entities, so lights, switches, media players, cameras, vacuums, covers, locks, persons, weather, sensors and most binary sensors could not be added even though they have ready-made indicator defaults. It now offers every entity of those types in the card's areas, and **Show all entities** lists every Home Assistant entity.
