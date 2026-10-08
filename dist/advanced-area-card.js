@@ -731,6 +731,26 @@ function formatNumber(value, digits = 0) {
 // configured areas. When provided, skips the (relatively expensive) call to
 // getAreasEntityIds. buildCardModel passes it so the list is computed once
 // for all chips instead of once per chip.
+// Whether an entity can be shown by a chip of this type.
+function chipEntityMatchesType(type, entityId, stateObj) {
+  switch (type) {
+    case "lights":
+      return getDomain(entityId) === "light";
+    case "music":
+      return getDomain(entityId) === "media_player";
+    case "temperature":
+      return isTemperatureEntity(stateObj, entityId);
+    case "humidity":
+      return isHumidityEntity(stateObj, entityId);
+    case "lux":
+      return isLuxEntity(stateObj, entityId);
+    case "custom":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function pickChipEntityIds(hass, registry, areaIds, chip, cachedAreaEntityIds) {
   const areaEntityIds = cachedAreaEntityIds || getAreasEntityIds(hass, registry, areaIds);
   const candidates = (chip.use_custom_entities || chip.type === "custom") ? (chip.entity_ids || []) : areaEntityIds;
@@ -739,22 +759,7 @@ function pickChipEntityIds(hass, registry, areaIds, chip, cachedAreaEntityIds) {
     if (!stateObj) {
       return false;
     }
-    switch (chip.type) {
-      case "lights":
-        return getDomain(entityId) === "light";
-      case "music":
-        return getDomain(entityId) === "media_player";
-      case "temperature":
-        return isTemperatureEntity(stateObj, entityId);
-      case "humidity":
-        return isHumidityEntity(stateObj, entityId);
-      case "lux":
-        return isLuxEntity(stateObj, entityId);
-      case "custom":
-        return true;
-      default:
-        return false;
-    }
+    return chipEntityMatchesType(chip.type, entityId, stateObj);
   });
 }
 
@@ -1880,43 +1885,33 @@ function getChipCandidates(hass, registry, areaIds, type) {
     if (!stateObj) {
       return false;
     }
-    switch (type) {
-      case "lights":
-        return getDomain(entityId) === "light";
-      case "music":
-        return getDomain(entityId) === "media_player";
-      case "temperature":
-        return isTemperatureEntity(stateObj, entityId);
-      case "humidity":
-        return isHumidityEntity(stateObj, entityId);
-      case "lux":
-        return isLuxEntity(stateObj, entityId);
-      default:
-        return false;
-    }
+    return type !== "custom" && chipEntityMatchesType(type, entityId, stateObj);
   });
 }
 
-function getIndicatorCandidates(hass, registry, areaIds) {
-  return sortByLabel(availableAreaEntityIds(hass, registry, areaIds), (entityId) => getEntityLabel(hass, entityId)).filter((entityId) => {
-    const stateObj = hass.states[entityId];
-    if (!stateObj) {
-      return false;
-    }
-    const role = detectIndicatorRole(entityId, stateObj);
-    return Boolean(role);
-  });
-}
+// Entity selectors in the editor offer the entities of the card's areas (plus
+// anything already selected) and, with the "Show all entities" switch on, all
+// entities. `entityPickerList` returns the `include_entities` list for such a
+// selector, or null when it should not be restricted at all.
+//   areaEntityIds  Set of the entities in the card's areas, or null when unknown
+//   filter         optional (entityId, stateObj, showAll) => boolean, applies in both modes
+const SHOW_ALL_FIELD = "show_all_entities";
 
-function getAllIndicatorCandidates(hass) {
-  if (!hass?.states) return [];
-  return sortByLabel(
-    Object.keys(hass.states).filter((entityId) => {
-      const stateObj = hass.states[entityId];
-      return stateObj && detectIndicatorRole(entityId, stateObj);
-    }),
-    (entityId) => getEntityLabel(hass, entityId)
-  );
+// Domains `getIndicatorDefaults` has a ready-made rule and look for. The
+// "add indicator" picker offers all of them.
+const INDICATOR_DOMAINS = new Set([
+  "binary_sensor", "light", "switch", "input_boolean", "fan", "media_player", "camera", "vacuum",
+  "cover", "weather", "climate", "lock", "person", "device_tracker", "sensor",
+]);
+
+function entityPickerList({ states, areaEntityIds, showAll, selected, filter }) {
+  const keep = (entityId) => !filter || filter(entityId, states?.[entityId], Boolean(showAll));
+  const chosen = (selected || []).filter(Boolean);
+  if (showAll || !areaEntityIds) {
+    if (!filter) return null;
+    return unique([...Object.keys(states || {}).filter(keep), ...chosen]);
+  }
+  return unique([...Array.from(areaEntityIds).filter((entityId) => states?.[entityId] && keep(entityId)), ...chosen]);
 }
 
 class AdvancedAreaCard extends HTMLElement {
@@ -2985,7 +2980,8 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._suppressEvents = false;
     this._selfEmitting = false;
     this._addingArea = false;
-    this._indicatorShowAll = false;
+    this._showAllKeys = new Set();   // entity selectors with "Show all entities" on (editor session only)
+    this._areaSetCache = null;
     this._boundClick = this.handleClick.bind(this);
     this._emittedJsons = [];
     this._unwatchRegistry = null;
@@ -3026,8 +3022,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     // module-level cache anyway); clearing only one left the editor with
     // an empty area list after a reattach.
     this._hass = null;
-    this._allEntityIdsCache = null;
-    this._allEntityIdsCacheCount = -1;
   }
 
   setConfig(config) {
@@ -3170,19 +3164,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     return sortByLabel(this._registry.areas, (area) => getAreaName(area));
   }
 
-  getIndicatorAddCandidateIds() {
-    if (!this._hass) return [];
-    const selected = new Set((this._config.activity_indicators || []).map((ind) => ind.entity_id));
-    if (this._indicatorShowAll) {
-      return getAllIndicatorCandidates(this._hass)
-        .filter((entityId) => !selected.has(entityId));
-    }
-    const areaIds = getConfigAreaIds(this._config);
-    if (!this._registry || !areaIds.length) return [];
-    return getIndicatorCandidates(this._hass, this._registry, areaIds)
-      .filter((entityId) => !selected.has(entityId));
-  }
-
   renderChipPreview(chip) {
     const areaIds = getConfigAreaIds(this._config);
     if (!this._hass || !this._registry || !areaIds.length) {
@@ -3282,6 +3263,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       active_color: "Active color",
       entity_id: "Entity",
       add_entity: "Select an entity to add",
+      show_all_entities: "Show all entities",
       entity: "Entity (optional, default: the first entity)",
       mode: "Show",
       count_operator: "Count entities whose value",
@@ -3409,13 +3391,12 @@ class AdvancedAreaCardEditor extends HTMLElement {
 
   _getChipSchema(chip) {
     if (chip.type === "custom") return this._getCustomChipSchema(chip);
-    const areaIds = getConfigAreaIds(this._config);
-    const candidateIds = this._hass && this._registry && areaIds.length
-      ? getChipCandidates(this._hass, this._registry, areaIds, chip.type)
-      : [];
-    const allIds = unique([...(chip.entity_ids || []), ...candidateIds]);
     const schema = [
-      { name: "entity_ids", selector: { entity: { multiple: true, include_entities: allIds } } },
+      ...this._entityPickerItems(`${chip.id}:entities`, "entity_ids", {
+        multiple: true,
+        selected: chip.entity_ids,
+        filter: (entityId, stateObj) => chipEntityMatchesType(chip.type, entityId, stateObj),
+      }),
       { name: "icon", selector: { icon: {} } },
     ];
     if (["lights", "music", "lux"].includes(chip.type)) {
@@ -3427,13 +3408,14 @@ class AdvancedAreaCardEditor extends HTMLElement {
     return schema;
   }
 
-  // Schema of a custom chip. Entities are not limited to the area; the
-  // attribute and value pickers follow the first selected entity.
+  // Schema of a custom chip. Any entity can be chosen (the area's entities
+  // are offered first, "Show all entities" lists everything); the attribute
+  // and value pickers follow the first selected entity.
   _getCustomChipSchema(chip) {
     const first = (chip.entity_ids || [])[0] || "";
     const operator = chip.count_operator || "truthy";
     const schema = [
-      { name: "entity_ids", selector: { entity: { multiple: true } } },
+      ...this._entityPickerItems(`${chip.id}:entities`, "entity_ids", { multiple: true, selected: chip.entity_ids }),
       { type: "grid", name: "", schema: [
         { name: "name", selector: { text: {} } },
         { name: "icon", selector: { icon: {} } },
@@ -3525,16 +3507,85 @@ class AdvancedAreaCardEditor extends HTMLElement {
     section.classList.toggle("threshold-section--unsorted", unsorted);
   }
 
-  _getIndicatorCandidateIds() {
+  // Schema of the "add indicator" picker. Entities that already have an
+  // indicator are left out. In the area view every entity of a domain that has
+  // ready-made indicator defaults is offered (plus anything whose name or
+  // device class suggests a role); "Show all entities" offers everything.
+  _getAddIndicatorSchema() {
+    const used = new Set((this._config.activity_indicators || []).flatMap((ind) => toEntityList(ind.when?.entity_id)));
+    return this._entityPickerItems("add-indicator", "add_entity", {
+      filter: (entityId, stateObj, showAll) => {
+        if (used.has(entityId)) return false;
+        if (showAll) return true;
+        return INDICATOR_DOMAINS.has(getDomain(entityId)) || Boolean(stateObj && detectIndicatorRole(entityId, stateObj));
+      },
+    });
+  }
+
+  // ── entity selectors scoped to the card's areas ─────────────────────────
+
+  // Set of the entities in the card's areas, or null when that is unknown
+  // (no area chosen, or the registry has not loaded yet).
+  _areaEntitySet() {
     const areaIds = getConfigAreaIds(this._config);
-    if (!this._hass || !this._registry || !areaIds.length) return [];
-    return getIndicatorCandidates(this._hass, this._registry, areaIds);
+    if (!this._hass || !this._registry || !areaIds.length) return null;
+    let count = 0;
+    for (const _id in this._hass.states) count++;
+    const areaKey = areaIds.join(",");
+    const cache = this._areaSetCache;
+    if (cache && cache.registry === this._registry && cache.areaKey === areaKey && cache.count === count) {
+      return cache.set;
+    }
+    const set = new Set(getAreasEntityIds(this._hass, this._registry, areaIds));
+    this._areaSetCache = { registry: this._registry, areaKey, count, set };
+    return set;
+  }
+
+  // Schema items for an entity selector plus its "Show all entities" switch.
+  // `scopeKey` identifies the selector; the switch state is kept per key for
+  // the editor session and is never saved in the card config.
+  _entityPickerItems(scopeKey, name, { multiple = false, selected = [], filter } = {}) {
+    const list = entityPickerList({
+      states: this._hass?.states,
+      areaEntityIds: this._areaEntitySet(),
+      showAll: this._showAllKeys.has(scopeKey),
+      selected,
+      filter,
+    });
+    const entity = {};
+    if (multiple) entity.multiple = true;
+    if (list) entity.include_entities = list;
+    return [
+      { name, selector: { entity } },
+      { name: SHOW_ALL_FIELD, selector: { boolean: {} } },
+    ];
+  }
+
+  _withShowAll(scopeKey, data) {
+    return { ...data, [SHOW_ALL_FIELD]: this._showAllKeys.has(scopeKey) };
+  }
+
+  _stripShowAll(value) {
+    const { [SHOW_ALL_FIELD]: _switch, ...rest } = value || {};
+    return rest;
+  }
+
+  // Handles a flip of the switch in a form: updates the state, swaps the
+  // selector's list in place (no re-render, so focus stays) and returns true.
+  // Returns false when the change was something else.
+  _applyShowAllChange(form, scopeKey, value, rebuildSchema) {
+    const on = Boolean(value?.[SHOW_ALL_FIELD]);
+    if (on === this._showAllKeys.has(scopeKey)) return false;
+    if (on) this._showAllKeys.add(scopeKey); else this._showAllKeys.delete(scopeKey);
+    form.schema = rebuildSchema();
+    form.data = { ...value, [SHOW_ALL_FIELD]: on };
+    return true;
   }
 
   // Returns the ha-form schema for a single rule node (state / numeric /
   // time / group). The `rule.type` drives which fields show up so that
   // changing the type rebuilds the form on the next render.
-  _getRuleSchema(rule, includeEntities) {
+  _getRuleSchema(rule, scopeKey) {
     const RULE_TYPES = [
       { value: "state",   label: "Text" },
       { value: "numeric", label: "Number" },
@@ -3554,7 +3605,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       : { text: {} };
     if (rule.type === "state") {
       schema.push(
-        { name: "entity_id", selector: { entity: { multiple: true, include_entities: includeEntities } } },
+        ...this._entityPickerItems(scopeKey, "entity_id", { multiple: true, selected: toEntityList(rule.entity_id) }),
         { name: "attribute", selector: attributeSelector },
         { name: "aggregation", selector: { select: { mode: "dropdown", options: [
           { value: "any",  label: "Any entity matches" },
@@ -3576,7 +3627,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       if (valueSelector) schema.push({ name: "value", selector: valueSelector });
     } else if (rule.type === "numeric") {
       schema.push(
-        { name: "entity_id", selector: { entity: { multiple: true, include_entities: includeEntities } } },
+        ...this._entityPickerItems(scopeKey, "entity_id", { multiple: true, selected: toEntityList(rule.entity_id) }),
         { name: "attribute", selector: attributeSelector },
         { name: "aggregation", selector: { select: { mode: "dropdown", options: [
           { value: "any",   label: "Any entity matches" },
@@ -3660,14 +3711,14 @@ class AdvancedAreaCardEditor extends HTMLElement {
   // Schema for a display_overrides entry condition (value type + entity
   // + optional attribute + operator + value). Mirrors the rule schema but
   // without aggregation / time / group options.
-  _getMapEntrySchema(type, entityId) {
+  _getMapEntrySchema(type, entityId, scopeKey) {
     const VALUE_TYPES = [
       { value: "numeric", label: "Number" },
       { value: "state",   label: "Text" },
     ];
     const schema = [
       { name: "type", selector: { select: { mode: "dropdown", options: VALUE_TYPES } } },
-      { name: "entity_id", selector: { entity: {} } },
+      ...this._entityPickerItems(scopeKey, "entity_id", { selected: [entityId] }),
       { name: "attribute", selector: entityId
         ? { attribute: { entity_id: entityId } }
         : { text: {} } },
@@ -3802,63 +3853,49 @@ class AdvancedAreaCardEditor extends HTMLElement {
       setAction(next);
       if (prev?.action !== next.action) this.render();
     });
-    this._setupForm(`${id}-entity`, { entity: getAction()?.entity || "" }, [{ name: "entity", selector: { entity: {} } }], (data) => {
+    const scopeKey = `${id}:entity`;
+    const entitySchema = () => this._entityPickerItems(scopeKey, "entity", { selected: [getAction()?.entity] });
+    this._setupForm(`${id}-entity`, { entity: getAction()?.entity || "" }, entitySchema(), (data) => {
       const next = { ...getAction() };
       if (data.entity) next.entity = data.entity; else delete next.entity;
       setAction(next);
-    });
+    }, { key: scopeKey, rebuild: entitySchema });
   }
 
-  _setupForm(id, data, schema, onChange) {
+  // `scope` ({ key, rebuild }) is given for forms with an entity selector
+  // that has a "Show all entities" switch: `key` identifies the selector and
+  // `rebuild()` returns the current schema.
+  _setupForm(id, data, schema, onChange, scope) {
     const form = this.shadowRoot.getElementById(id);
     if (!form) return;
     form.hass = this._hass;
-    form.data = data;
+    form.data = scope ? this._withShowAll(scope.key, data) : data;
     form.schema = schema;
     form.computeLabel = (s) => this._computeLabel(s);
     form.addEventListener("value-changed", (e) => {
       if (this._suppressEvents) return;
       e.stopPropagation();
+      if (scope) {
+        if (this._applyShowAllChange(form, scope.key, e.detail.value, scope.rebuild)) return;
+        onChange(this._stripShowAll(e.detail.value));
+        return;
+      }
       onChange(e.detail.value);
     });
-  }
-
-  // Returns an include_entities list for rule sub-editors: union of the
-  // entities already referenced by the indicator and the full hass-known
-  // entity list. If hass isn't available yet, falls back to the indicator's
-  // own entities.
-  _getIndicatorRuleCandidates(indicator) {
-    const own = collectIndicatorEntityIds(indicator);
-    if (!this._hass || !this._hass.states) return Array.from(own);
-    // Cache the full hass-entity id list, invalidated when entities are
-    // added/removed. Every `_setupRuleSubeditor` call would otherwise
-    // allocate a fresh Set + spread of Object.keys (often 1000+ ids).
-    const count = Object.keys(this._hass.states).length;
-    if (this._allEntityIdsCacheCount !== count) {
-      this._allEntityIdsCache = Object.keys(this._hass.states);
-      this._allEntityIdsCacheCount = count;
-    }
-    if (own.size === 0) return this._allEntityIdsCache;
-    // Merge own ids (may include ids not in hass.states, e.g. typos).
-    const all = this._allEntityIdsCache;
-    const extras = [];
-    for (const id of own) {
-      if (!this._hass.states[id]) extras.push(id);
-    }
-    return extras.length ? [...all, ...extras] : all;
   }
 
   // Wires one rule-sub-editor form. The caller passes the current rule;
   // onChange receives the normalized new rule object. Handles type changes
   // (e.g. state → numeric) by re-rendering so the schema updates.
-  _bindRuleForm(formId, rule, includeEntities, onChange) {
+  _bindRuleForm(formId, rule, scopeKey, onChange) {
     const form = this.shadowRoot.getElementById(formId);
     if (!form) return;
     const baseRule = rule || { type: "state" };
-    const schema = this._getRuleSchema(baseRule, includeEntities);
+    let currentRule = baseRule;
+    const schema = this._getRuleSchema(baseRule, scopeKey);
     // Flat form shape: the ha-form works in flat keys, so we serialize a
     // few rule fields into flat keys and round-trip them.
-    const formValue = this._ruleToFormData(baseRule);
+    const formValue = this._withShowAll(scopeKey, this._ruleToFormData(baseRule));
     let schemaKey = this._ruleSchemaKey({ ...baseRule, operator: formValue.operator });
     form.hass = this._hass;
     form.data = formValue;
@@ -3867,7 +3904,8 @@ class AdvancedAreaCardEditor extends HTMLElement {
     form.addEventListener("value-changed", (e) => {
       if (this._suppressEvents) return;
       e.stopPropagation();
-      const data = e.detail.value;
+      if (this._applyShowAllChange(form, scopeKey, e.detail.value, () => this._getRuleSchema(currentRule, scopeKey))) return;
+      const data = this._stripShowAll(e.detail.value);
       const prevType = baseRule.type || "state";
       const newType = data.type || prevType;
       let newRule;
@@ -3903,9 +3941,10 @@ class AdvancedAreaCardEditor extends HTMLElement {
       const nextKey = this._ruleSchemaKey(newRule);
       if (nextKey !== schemaKey && newType === prevType) {
         schemaKey = nextKey;
-        form.schema = this._getRuleSchema(newRule, includeEntities);
-        form.data = this._ruleToFormData(newRule);
+        form.schema = this._getRuleSchema(newRule, scopeKey);
+        form.data = this._withShowAll(scopeKey, this._ruleToFormData(newRule));
       }
+      currentRule = newRule;
       onChange(newRule);
     });
   }
@@ -4297,7 +4336,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
       ? [""]
       : (this._addingArea ? [...selectedAreaIds, ""] : [...selectedAreaIds]);
     const showAddButton = areaSelected && !this._addingArea;
-    const indicatorCandidateIds = this.getIndicatorAddCandidateIds();
 
     const areaRowsMarkup = areaSlots.map((value, index) => {
       const showRemove = areaSlots.length > 1;
@@ -4410,10 +4448,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
         ${areaSelected ? `
           <div class="add-indicator-row">
             <ha-form id="add-indicator-form"></ha-form>
-            <label class="show-all-toggle" data-action="toggle-indicator-show-all">
-              <input type="checkbox" ${this._indicatorShowAll ? "checked" : ""} />
-              Show all entities
-            </label>
           </div>
         ` : ""}
       </div>
@@ -4534,7 +4568,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
           }
           this.emitConfig();
           if (rebuild) this.render();
-        });
+        }, { key: `${chip.id}:entities`, rebuild: () => this._getChipSchema(this._config.chips[i]) });
         if ((chip.type === "custom") || (chip.type === "music") || (chip.type === "lights" && !chip.use_light_color)) {
           const def = CHIP_DEFINITIONS[chip.type]?.activeColor || "#43b581";
           this._setupColorPicker(`chip-${i}-color`, chip.active_color, def, (value) => {
@@ -4594,12 +4628,10 @@ class AdvancedAreaCardEditor extends HTMLElement {
         });
       });
 
-      const addIndicatorSchema = this._indicatorShowAll
-        ? [{ name: "add_entity", selector: { entity: {} } }]
-        : [{ name: "add_entity", selector: { entity: { include_entities: indicatorCandidateIds } } }];
+      const addIndicatorSchema = () => this._getAddIndicatorSchema();
       this._setupForm("add-indicator-form",
         { add_entity: "" },
-        addIndicatorSchema,
+        addIndicatorSchema(),
         (data) => {
           const entityId = data.add_entity || "";
           if (!entityId) return;
@@ -4628,15 +4660,10 @@ class AdvancedAreaCardEditor extends HTMLElement {
           this.emitConfig();
           this.render();
         },
+        { key: "add-indicator", rebuild: addIndicatorSchema },
       );
 
       this._config.activity_indicators.forEach((indicator, i) => {
-        // Union of all entities referenced by this indicator's rules, plus
-        // all hass-known entity_ids as fallback. Used for entity selectors
-        // inside rule sub-editors so users aren't limited to already-chosen
-        // entities.
-        const ruleCandidates = this._getIndicatorRuleCandidates(indicator);
-
         // Basic: name + for_duration.
         this._setupForm(`indicator-${i}-basic-form`,
           {
@@ -4657,7 +4684,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         // When: rule node editor.
         {
           const prevType = (indicator.when?.type) || "state";
-          this._bindRuleForm(`indicator-${i}-when-form`, indicator.when, ruleCandidates, (newRule) => {
+          this._bindRuleForm(`indicator-${i}-when-form`, indicator.when, `${indicator.id}:when`, (newRule) => {
             this._config.activity_indicators[i].when = newRule;
             this.emitConfig();
             if (newRule.type !== prevType) this.render();
@@ -4667,7 +4694,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         // And-if: one form per condition.
         (indicator.and_if || []).forEach((condRule, ri) => {
           const prevType = (condRule?.type) || "state";
-          this._bindRuleForm(`indicator-${i}-andif-${ri}-form`, condRule, ruleCandidates, (newRule) => {
+          this._bindRuleForm(`indicator-${i}-andif-${ri}-form`, condRule, `${indicator.id}:andif:${ri}`, (newRule) => {
             this._config.activity_indicators[i].and_if[ri] = newRule;
             this.emitConfig();
             if (newRule.type !== prevType) this.render();
@@ -4712,7 +4739,8 @@ class AdvancedAreaCardEditor extends HTMLElement {
         (display.display_overrides || []).forEach((entry, oi) => {
           // Match condition form.
           const matchType = entry.match?.type || "numeric";
-          const matchSchema = this._getMapEntrySchema(matchType, entry.match?.entity_id || "");
+          const matchScopeKey = `${indicator.id}:override:${oi}`;
+          const matchSchema = this._getMapEntrySchema(matchType, entry.match?.entity_id || "", matchScopeKey);
           const matchFormId = `indicator-${i}-override-${oi}-match-form`;
           let matchEntity = entry.match?.entity_id || "";
           const prevMatchType = matchType;
@@ -4746,8 +4774,15 @@ class AdvancedAreaCardEditor extends HTMLElement {
                 // New entity: the attribute picker must list its attributes.
                 matchEntity = data.entity_id || "";
                 const matchForm = this.shadowRoot.getElementById(matchFormId);
-                if (matchForm) matchForm.schema = this._getMapEntrySchema(m.type, matchEntity);
+                if (matchForm) matchForm.schema = this._getMapEntrySchema(m.type, matchEntity, matchScopeKey);
               }
+            },
+            {
+              key: matchScopeKey,
+              rebuild: () => {
+                const current = this._config.activity_indicators[i].display.display_overrides[oi]?.match || {};
+                return this._getMapEntrySchema(current.type || "numeric", current.entity_id || "", matchScopeKey);
+              },
             },
           );
           // Display override fields.
@@ -5158,16 +5193,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
         flex: 1;
         min-width: 200px;
       }
-      .show-all-toggle {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        font-size: 12px;
-        color: var(--secondary-text-color);
-        cursor: pointer;
-        padding-bottom: 8px;
-        white-space: nowrap;
-      }
       .threshold-section {
         display: flex;
         flex-direction: column;
@@ -5459,11 +5484,6 @@ class AdvancedAreaCardEditor extends HTMLElement {
     if (!button) return;
     const action = button.dataset.action;
 
-    if (action === "toggle-indicator-show-all") {
-      this._indicatorShowAll = !this._indicatorShowAll;
-      this.render();
-      return;
-    }
     if (action === "show-add-area") {
       if (this._addingArea) return;
       this._addingArea = true;
