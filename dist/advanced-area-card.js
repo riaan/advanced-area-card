@@ -4,6 +4,7 @@ const DEFAULT_CARD_TYPE = `custom:${CARD_TYPE}`;
 const ACTION_HOLD_DELAY = 500;
 const REGISTRY_RETRY_MS = 10000;
 const EDITOR_PREVIEW_THROTTLE_MS = 500;
+const RESET_CONFIRM_MS = 4000;
 
 // Default visual sizes – change these to tweak the card appearance globally.
 const DEFAULT_TITLE_SIZE = "1.28571429rem";
@@ -302,6 +303,24 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
+// Fresh copy of the built-in threshold table of a chip type (empty for types
+// without one, such as custom chips).
+function defaultThresholds(type) {
+  return (DEFAULT_THRESHOLDS[type] || []).map((threshold) => ({ ...threshold }));
+}
+
+// True when a chip's table is exactly the built-in one.
+function thresholdsAreDefault(type, thresholds) {
+  const defaults = defaultThresholds(type);
+  if (!Array.isArray(thresholds) || thresholds.length !== defaults.length) return false;
+  return defaults.every((entry, index) => {
+    const other = thresholds[index];
+    return other && Number(other.value) === entry.value
+      && (other.color || "") === (entry.color || "")
+      && (other.icon || "") === (entry.icon || "");
+  });
+}
+
 function createDefaultChip(type) {
   const chip = {
     id: makeId(type),
@@ -310,7 +329,7 @@ function createDefaultChip(type) {
     hidden_when_zero: false,
     use_custom_entities: true,
     entity_ids: [],
-    thresholds: (DEFAULT_THRESHOLDS[type] || []).map((t) => ({ ...t })),
+    thresholds: defaultThresholds(type),
     tap_action: { action: "more-info" },
     hold_action: { action: "none" },
   };
@@ -411,7 +430,7 @@ function normalizeConfig(inputConfig) {
           color: threshold.color || "#43b581",
           icon: typeof threshold.icon === "string" ? threshold.icon : "",
         }))
-      : (DEFAULT_THRESHOLDS[chip.type] || []).map((t) => ({ ...t }))
+      : defaultThresholds(chip.type)
     ).sort((a, b) => a.value - b.value),
     tap_action: normalizeAction(chip.tap_action) || { action: "more-info" },
     hold_action: normalizeAction(chip.hold_action) || { action: "none" },
@@ -2980,6 +2999,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._suppressEvents = false;
     this._selfEmitting = false;
     this._addingArea = false;
+    this._resetArmed = null;         // pending "Click again to reset" of a threshold table
     this._showAllKeys = new Set();   // entity selectors with "Show all entities" on (editor session only)
     this._areaSetCache = null;
     this._boundClick = this.handleClick.bind(this);
@@ -3017,6 +3037,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       this._unwatchRegistry();
       this._unwatchRegistry = null;
     }
+    this._disarmReset();
     // Release references for GC; they'll be repopulated on reconnect.
     // `_registry` is kept together with `_registryLoaded` (it is the shared
     // module-level cache anyway); clearing only one left the editor with
@@ -3491,12 +3512,23 @@ class AdvancedAreaCardEditor extends HTMLElement {
     }
   }
 
-  // Flags rows that are out of order and shows the hint, without touching
+  // Cancels a pending "Click again to reset" and restores the button label.
+  _disarmReset() {
+    if (!this._resetArmed) return;
+    clearTimeout(this._resetArmed.timer);
+    if (this._resetArmed.label) this._resetArmed.label.textContent = "Reset to defaults";
+    this._resetArmed = null;
+  }
+
+  // Flags rows that are out of order and shows the hint, and shows the reset
+  // button while the table differs from the built-in one, without touching
   // the DOM structure (the row being edited must keep its focus).
   _markThresholdOrder(chipIndex) {
     const section = this.shadowRoot.getElementById(`chip-${chipIndex}-threshold-section`);
-    const thresholds = this._config.chips[chipIndex]?.thresholds;
+    const chip = this._config.chips[chipIndex];
+    const thresholds = chip?.thresholds;
     if (!section || !Array.isArray(thresholds)) return;
+    section.classList.toggle("threshold-section--modified", !thresholdsAreDefault(chip.type, thresholds));
     let unsorted = false;
     section.querySelectorAll(".threshold-row").forEach((row) => {
       const index = Number(row.dataset.thresholdIndex);
@@ -4030,6 +4062,11 @@ class AdvancedAreaCardEditor extends HTMLElement {
             <ha-icon icon="mdi:sort-ascending" slot="start"></ha-icon>
             Sort by value
           </ha-button>
+          ${DEFAULT_THRESHOLDS[chip.type] ? `
+          <ha-button class="threshold-reset" appearance="plain" size="s" data-action="reset-thresholds" data-chip-index="${chipIndex}">
+            <ha-icon icon="mdi:restore" slot="start"></ha-icon>
+            <span class="reset-label">Reset to defaults</span>
+          </ha-button>` : ""}
           <ha-button appearance="filled" size="s" data-action="add-threshold" data-chip-index="${chipIndex}">
             <ha-icon icon="mdi:plus" slot="start"></ha-icon>
             Add row
@@ -4604,6 +4641,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
               (data) => {
                 this._config.chips[i].thresholds[ti].color = data.color || "";
                 this.emitConfig();
+                this._markThresholdOrder(i);
               },
             );
             this._setupForm(
@@ -4613,6 +4651,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
               (data) => {
                 this._config.chips[i].thresholds[ti].icon = data.icon || "";
                 this.emitConfig();
+                this._markThresholdOrder(i);
               },
             );
           });
@@ -5222,8 +5261,12 @@ class AdvancedAreaCardEditor extends HTMLElement {
         font-size: 12px;
         color: var(--warning-color, #ff9800);
       }
-      .threshold-sort {
+      .threshold-sort,
+      .threshold-reset {
         display: none;
+      }
+      .threshold-section--modified .threshold-reset {
+        display: inline-flex;
       }
       .threshold-section--unsorted .threshold-hint {
         display: block;
@@ -5544,6 +5587,28 @@ class AdvancedAreaCardEditor extends HTMLElement {
       if (!chip || !this._hass || !this._registry || !areaIds.length) return;
       const candidates = getChipCandidates(this._hass, this._registry, areaIds, chip.type);
       chip.entity_ids = unique([...(chip.entity_ids || []), ...candidates]);
+      this.emitConfig();
+      this.render();
+      return;
+    }
+    if (action === "reset-thresholds") {
+      const chipIndex = Number(button.dataset.chipIndex);
+      const chip = this._config.chips[chipIndex];
+      if (!chip) return;
+      const label = button.querySelector(".reset-label");
+      // First click arms the button, the second one (within a few seconds) resets.
+      if (this._resetArmed?.button !== button) {
+        this._disarmReset();
+        if (label) label.textContent = "Click again to reset";
+        this._resetArmed = {
+          button,
+          label,
+          timer: setTimeout(() => this._disarmReset(), RESET_CONFIRM_MS),
+        };
+        return;
+      }
+      this._disarmReset();
+      chip.thresholds = defaultThresholds(chip.type);
       this.emitConfig();
       this.render();
       return;
