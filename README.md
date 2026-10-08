@@ -73,7 +73,7 @@ Small pills under the header that summarise the area. Five are ready-made:
 - set **tap** and **hold** actions (default: more-info), see [Actions](#actions);
 - **hide it when zero** (`hidden_when_zero`; lights, music, lux and custom chips);
 - override the **active / inactive colours** (`active_color`, `inactive_color`; lights, music and custom chips);
-- edit the **threshold table** (value → colour → optional icon) of temperature, humidity, lux and numeric custom chips. Sensible defaults are built in. When rows end up out of order, the editor marks them and offers a **Sort by value** button.
+- edit the **threshold table** (value → colour → optional icon) of temperature, humidity, lux and numeric custom chips. Sensible defaults are built in. When rows end up out of order, the editor marks them and offers a **Sort by value** button. The temperature, humidity and lux tables have a **Reset to defaults** button that restores the built-in rows.
 
 #### Custom chips
 
