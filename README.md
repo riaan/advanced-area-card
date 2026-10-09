@@ -140,7 +140,7 @@ Under `styling` you can hide the title or icon, set their colours and tweak size
 ### Dashboards and accessibility
 
 - **Sections view**: the card is full width by default, can be resized down to half a section, and its height follows its content.
-- **Keyboard and screen readers**: Tab to a chip or indicator and press Enter or Space for its tap action. Chips and indicators have accessible names. The card-level tap and hold actions are only reachable with a pointer.
+- **Keyboard and screen readers**: Tab to a chip or indicator and press Enter or Space for its tap action. Chips and indicators have accessible names. When the card has a tap or hold action, the header (area icon and name) becomes focusable too: press Enter or Space on it to run the card's tap action (or its hold action when that is the only one).
 - **Reduced motion**: indicator animations are switched off when your system asks for reduced motion.
 
 ## Configuration
