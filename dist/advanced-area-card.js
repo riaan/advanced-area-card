@@ -2663,15 +2663,44 @@ class AdvancedAreaCard extends HTMLElement {
       if (element.dataset.kind === "card") this._runCardKeyboardAction(cfg);
       else this._runGesture(cfg, "tap_action");
     });
-    // The card's own action by keyboard: the header (icon and name) is the
-    // focus target when the card has an action; Enter or Space runs it.
+    // Keyboard. Enter / Space on a chip or indicator is a click (tap action).
+    // The card's own action: the header (icon and name) is the focus target
+    // when the card has an action; Enter / Space runs its tap action.
+    // Hold action: Shift+Enter, Shift+Space, the context-menu key or
+    // Shift+F10 on a chip, indicator or the header.
+    let holdKeyDown = false;
     root.addEventListener("keydown", (event) => {
-      if ((event.key !== "Enter" && event.key !== " ") || event.repeat) return;
-      const target = event.composedPath().find((node) => node.nodeType === 1 && node.dataset?.cardAction === "true");
-      if (!target) return;
+      if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+      const path = event.composedPath();
+      const header = path.find((node) => node.nodeType === 1 && node.dataset?.cardAction === "true");
+      const holdKey = ((event.key === "Enter" || event.key === " ") && event.shiftKey)
+        || event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
+      if (holdKey) {
+        const element = findTarget(event);
+        if (!element) return;
+        // The card shell is only a target through its focusable header.
+        if (element.dataset.kind === "card" && !header) return;
+        const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
+        if (!cfg) return;
+        // Stops the browser from also sending a click (the tap action) and,
+        // for the context-menu keys, from opening its own menu.
+        event.preventDefault();
+        holdKeyDown = event.key === " ";
+        this._runGesture(cfg, "hold_action");
+        return;
+      }
+      if ((event.key !== "Enter" && event.key !== " ") || !header) return;
       event.preventDefault(); // Space would scroll the page
       const cardCfg = this._modelIndex.get("card:");
       if (cardCfg) this._runCardKeyboardAction(cardCfg);
+    });
+    // A button is clicked when Space is released; swallow that click after a
+    // Shift+Space hold (Shift may already be up by then).
+    root.addEventListener("keyup", (event) => {
+      if (event.key === " " && holdKeyDown) {
+        holdKeyDown = false;
+        event.preventDefault();
+      }
     });
     root.addEventListener("contextmenu", (event) => {
       if (findTarget(event)) event.preventDefault();
