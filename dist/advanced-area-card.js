@@ -2523,7 +2523,7 @@ class AdvancedAreaCard extends HTMLElement {
     const styleVars = buildStyleVars(model.styling);
     const titleGroup = (model.showIcon || model.showTitle)
       ? `
-            <div class="title-group">
+            <div class="title-group" ${cardHasAction ? `data-card-action="true" tabindex="0" role="button" aria-label="${htmlEscape(model.title)}"` : ""}>
               ${model.showIcon ? `
                 <div class="area-icon area-icon-${htmlEscape(model.iconStyle)}">
                   <ha-icon icon="${htmlEscape(model.icon)}"></ha-icon>
@@ -2582,6 +2582,13 @@ class AdvancedAreaCard extends HTMLElement {
     if (cardCfg && cardCfg !== cfg && !isNone(cardCfg[gesture])) {
       this.handleAction(cardCfg[gesture]);
     }
+  }
+
+  // Keyboard and assistive-technology activation of the card: its tap action,
+  // or its hold action when it only has that one (so it stays reachable).
+  _runCardKeyboardAction(cardCfg) {
+    const isNone = (action) => !action || !action.action || action.action === "none";
+    this._runGesture(cardCfg, isNone(cardCfg.tap_action) && !isNone(cardCfg.hold_action) ? "hold_action" : "tap_action");
   }
 
   // Attach one set of pointer listeners to the shadow root; they dispatch
@@ -2653,7 +2660,18 @@ class AdvancedAreaCard extends HTMLElement {
       const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
       if (!cfg) return;
       event.stopPropagation();
-      this._runGesture(cfg, "tap_action");
+      if (element.dataset.kind === "card") this._runCardKeyboardAction(cfg);
+      else this._runGesture(cfg, "tap_action");
+    });
+    // The card's own action by keyboard: the header (icon and name) is the
+    // focus target when the card has an action; Enter or Space runs it.
+    root.addEventListener("keydown", (event) => {
+      if ((event.key !== "Enter" && event.key !== " ") || event.repeat) return;
+      const target = event.composedPath().find((node) => node.nodeType === 1 && node.dataset?.cardAction === "true");
+      if (!target) return;
+      event.preventDefault(); // Space would scroll the page
+      const cardCfg = this._modelIndex.get("card:");
+      if (cardCfg) this._runCardKeyboardAction(cardCfg);
     });
     root.addEventListener("contextmenu", (event) => {
       if (findTarget(event)) event.preventDefault();
@@ -2774,6 +2792,15 @@ class AdvancedAreaCard extends HTMLElement {
         align-items: center;
         gap: 16px;
         min-width: 0;
+      }
+      /* Focusable header (card action by keyboard): a little padding so the
+         focus ring does not hug the text, cancelled by the negative margin so
+         the layout does not move, and the theme's card corner radius so the
+         ring is rounded like the rest of the dashboard. */
+      .title-group[data-card-action] {
+        padding: 4px 8px;
+        margin: -4px -8px;
+        border-radius: var(--ha-card-border-radius, 12px);
       }
       .area-icon {
         display: inline-flex;
@@ -2923,7 +2950,8 @@ class AdvancedAreaCard extends HTMLElement {
         margin-bottom: 14px;
       }
       .chip:focus-visible,
-      .indicator:focus-visible {
+      .indicator:focus-visible,
+      .title-group[data-card-action]:focus-visible {
         outline: 2px solid var(--primary-color);
         outline-offset: 2px;
       }

@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The card's own tap or hold action can be used from the keyboard and by screen readers: when the card has an action, the header (area icon and name) is focusable, and Enter or Space runs the tap action (or the hold action when that is the only one). The focus ring is rounded with your theme's card corner radius.
 - Editor: a **Reset to defaults** button for the threshold table of temperature, humidity and lux chips. It appears once the table differs from the built-in one and asks for a second click to confirm.
 
 ## [1.5.0]
