@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.6.0]
+
 ### Fixed
 
 - An indicator without a rule no longer ends up with an empty-string entity the first time it is normalised and an empty list the second time; its entity list is empty both times. This keeps the editor's recognition of its own echoed config reliable for incomplete configs.
