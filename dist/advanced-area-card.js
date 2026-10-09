@@ -1330,7 +1330,7 @@ const BINARY_SENSOR_PRESETS = {
 function _mkStateWhen(entityId, spec) {
   return {
     type: "state",
-    entity_id: [entityId],
+    entity_id: entityId ? [entityId] : [],
     attribute: spec.attribute || null,
     aggregation: spec.aggregation || "any",
     operator: spec.operator || "eq",
@@ -1342,7 +1342,7 @@ function _mkStateWhen(entityId, spec) {
 function _mkNumericWhen(entityId, spec) {
   return {
     type: "numeric",
-    entity_id: [entityId],
+    entity_id: entityId ? [entityId] : [],
     attribute: spec.attribute || null,
     aggregation: spec.aggregation || "any",
     operator: spec.operator || "gt",

@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- An indicator without a rule no longer ends up with an empty-string entity the first time it is normalised and an empty list the second time; its entity list is empty both times. This keeps the editor's recognition of its own echoed config reliable for incomplete configs.
+
 ### Added
 
 - Editor: a **Reset to defaults** button for the threshold table of temperature, humidity and lux chips. It appears once the table differs from the built-in one and asks for a second click to confirm.
