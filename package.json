@@ -1,0 +1,19 @@
+{
+  "name": "advanced-area-card",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Home Assistant Lovelace area card with summary chips and rule-based activity indicators. Dev tooling only; nothing here ships.",
+  "license": "MIT",
+  "scripts": {
+    "lint": "eslint dist scripts",
+    "format": "prettier --write .",
+    "check:version": "node scripts/check-version.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0",
+    "prettier": "^3.0.0"
+  }
+}
