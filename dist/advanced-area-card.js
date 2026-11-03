@@ -1,4 +1,4 @@
-const VERSION = "1.0.0";
+const VERSION = "1.0.1";
 const CARD_TYPE = "advanced-area-card";
 const DEFAULT_CARD_TYPE = `custom:${CARD_TYPE}`;
 const ACTION_HOLD_DELAY = 500;

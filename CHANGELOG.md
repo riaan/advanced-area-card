@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.1]
+
+### Changed
+
+- No changes to the card. Release for the HACS listing: the repository now has its topics and description set, so the HACS validation passes on this tag.
+
 ## [1.0.0]
 
 First public release.
