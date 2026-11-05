@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.2]
+
 ### Changed
 
 - README: installation now leads with searching for the card in HACS (Settings → Marketplace on Home Assistant 2026.11 and newer); the custom repository steps are a fallback.
