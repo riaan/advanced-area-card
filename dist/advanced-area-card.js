@@ -227,7 +227,12 @@ function ensureRegistryMaps(registry) {
 // every call (hot path — runs once per indicator per render).
 const NUMERIC_OPS = new Set(["gt", "gte", "lt", "lte"]);
 
-const activeActionMap = new WeakMap();
+// A finger may move this far (px) and still count as a tap / hold.
+const PRESS_MOVE_TOLERANCE = 10;
+// A click counts as the end of a tap only this soon after pointerup (ms).
+const PENDING_TAP_MS = 1000;
+// Upper bound for how long a hold waits for its trailing click (ms).
+const SWALLOW_CLICK_MAX_MS = 15000;
 
 function fireEvent(node, type, detail = {}, options = {}) {
   const event = new CustomEvent(type, {
@@ -2006,10 +2011,11 @@ class AdvancedAreaCard extends HTMLElement {
     this._stopRegistryWatch();
     // A press in progress must not fire its hold action after the card left
     // the DOM.
-    this.shadowRoot.querySelectorAll("[data-interactive]").forEach((element) => {
-      const state = activeActionMap.get(element);
-      if (state) clearTimeout(state.timer);
-    });
+    if (this._press) {
+      clearTimeout(this._press.timer);
+      this._press = null;
+    }
+    this._pendingTap = null;
   }
 
   // Follow registry changes (renamed areas, moved devices, ...) while the
@@ -2567,6 +2573,29 @@ class AdvancedAreaCard extends HTMLElement {
     });
   }
 
+  // After a hold action the finger is still down, and the click that follows
+  // the release would land on whatever the action opened (a navigate shows
+  // another page under the finger). Eat exactly that click. A new press
+  // (pointerdown) or a timeout ends the guard so a real click is never lost.
+  _swallowNextClick() {
+    if (this._unswallow) this._unswallow();
+    const eat = (event) => {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      done();
+    };
+    const done = () => {
+      window.removeEventListener("click", eat, true);
+      window.removeEventListener("pointerdown", done, true);
+      clearTimeout(timer);
+      this._unswallow = null;
+    };
+    const timer = window.setTimeout(done, SWALLOW_CLICK_MAX_MS);
+    window.addEventListener("click", eat, true);
+    window.addEventListener("pointerdown", done, true);
+    this._unswallow = done;
+  }
+
   // Runs the tap or hold action of a chip / indicator / the card. A chip or
   // indicator whose action is "none" has no action of its own, so the press
   // goes to the card's action for the same gesture (like a click that
@@ -2605,58 +2634,92 @@ class AdvancedAreaCard extends HTMLElement {
       }
       return null;
     };
+    // One press at a time, remembered by what the finger went DOWN on.
+    //
+    // The TAP action runs from the `click` that follows the press, not from
+    // pointerup. A tap on a touch screen produces pointerup first and a click
+    // a moment later at the same screen position. If the tap action navigates
+    // on pointerup, the new page is already showing when that click arrives,
+    // so it lands on whatever sits under the finger there (a light card, a
+    // lock dialog, ...). Running the action from the click itself means
+    // nothing follows it.
+    //
+    // The HOLD action runs from a timer while the finger is still down. The
+    // click that follows the release would hit the new page in the same way,
+    // so that one click is swallowed (see _swallowNextClick).
+    const clearPress = () => {
+      if (this._press) clearTimeout(this._press.timer);
+      this._press = null;
+    };
     root.addEventListener("pointerdown", (event) => {
+      if (event.isPrimary === false) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
       const element = findTarget(event);
       if (!element) return;
-      const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
-      if (!cfg) return;
-      event.preventDefault();
       const kind = element.dataset.kind;
+      const key = `${kind}:${element.dataset.id || ""}`;
+      if (!this._modelIndex.get(key)) return;
+      event.preventDefault();
       if (kind === "chip" || kind === "indicator") event.stopPropagation();
-      const state = activeActionMap.get(element) || {};
-      state.cancelled = false;
-      state.held = false;
-      clearTimeout(state.timer);
-      state.timer = window.setTimeout(() => {
-        state.held = true;
+      clearPress();
+      this._pendingTap = null;
+      const press = { key, kind, held: false, cancelled: false, x: event.clientX, y: event.clientY, id: event.pointerId, timer: 0 };
+      press.timer = window.setTimeout(() => {
+        press.held = true;
+        // Look the config up again: a re-render may have replaced the model.
+        const cfg = this._modelIndex.get(key);
+        if (!cfg) return;
+        const hold = cfg.hold_action;
+        const own = hold && hold.action && hold.action !== "none";
+        const cardCfg = this._modelIndex.get("card:");
+        const cardHold = cardCfg && cardCfg !== cfg ? cardCfg.hold_action : null;
+        if (own || (cardHold && cardHold.action && cardHold.action !== "none")) this._swallowNextClick();
         this._runGesture(cfg, "hold_action");
       }, ACTION_HOLD_DELAY);
-      activeActionMap.set(element, state);
+      this._press = press;
+    });
+    // A finger that travels (scrolling, a sloppy tap) is not a tap or a hold.
+    root.addEventListener("pointermove", (event) => {
+      const press = this._press;
+      if (!press || press.cancelled || event.pointerId !== press.id) return;
+      if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > PRESS_MOVE_TOLERANCE) {
+        press.cancelled = true;
+        clearTimeout(press.timer);
+      }
     });
     root.addEventListener("pointerup", (event) => {
-      const element = findTarget(event);
-      if (!element) return;
-      const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
-      if (!cfg) return;
-      const kind = element.dataset.kind;
-      if (kind === "chip" || kind === "indicator") event.stopPropagation();
-      const state = activeActionMap.get(element);
-      if (!state) return;
-      clearTimeout(state.timer);
-      if (!state.held && !state.cancelled) {
-        this._runGesture(cfg, "tap_action");
-      }
-      state.cancelled = false;
+      const press = this._press;
+      if (!press || event.pointerId !== press.id) return;
+      clearPress();
+      if (press.kind === "chip" || press.kind === "indicator") event.stopPropagation();
+      // Remember what was pressed; the click that follows runs the tap.
+      this._pendingTap = press.held || press.cancelled ? null : { key: press.key, at: Date.now() };
     });
     const cancel = (event) => {
-      const element = findTarget(event);
-      if (!element) return;
-      const state = activeActionMap.get(element);
-      if (!state) return;
-      state.cancelled = true;
-      clearTimeout(state.timer);
+      const press = this._press;
+      if (!press || event.pointerId !== press.id) return;
+      clearPress();
+      this._pendingTap = null;
     };
-    // pointerleave doesn't bubble, so use capture to see it on any descendant.
-    root.addEventListener("pointerleave", cancel, true);
     root.addEventListener("pointercancel", cancel);
-    // Keyboard (Enter/Space) and assistive-technology activation produce a
-    // click with detail 0. Real pointer clicks (detail >= 1) are already
-    // handled by pointerdown/pointerup above, so ignore them to avoid
-    // firing the tap action twice.
+    // Tap action. Keyboard (Enter/Space) and assistive technology send a click
+    // with detail 0; a finger or mouse sends detail >= 1 after pointerup.
     root.addEventListener("click", (event) => {
-      if (event.detail !== 0) return;
       const element = findTarget(event);
       if (!element) return;
+      const pending = this._pendingTap;
+      this._pendingTap = null;
+      if (event.detail !== 0) {
+        // Pointer click: only valid right after a press that was a plain tap
+        // (not a hold, not a scroll).
+        if (!pending || Date.now() - pending.at > PENDING_TAP_MS) return;
+        const cfgPressed = this._modelIndex.get(pending.key);
+        if (!cfgPressed) return;
+        event.stopPropagation();
+        if (pending.key.startsWith("card:")) this._runCardKeyboardAction(cfgPressed);
+        else this._runGesture(cfgPressed, "tap_action");
+        return;
+      }
       const cfg = this._modelIndex.get(`${element.dataset.kind}:${element.dataset.id || ""}`);
       if (!cfg) return;
       event.stopPropagation();

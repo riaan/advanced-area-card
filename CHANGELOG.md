@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- README: installation now leads with searching for the card in HACS (Settings → Marketplace on Home Assistant 2026.11 and newer); the custom repository steps are a fallback.
+
+### Fixed
+
+- Touch screens: tapping the card could also "tap" the page it navigated to. The tap action ran on release, so the browser's follow-up click landed on whatever the new page showed under the finger (a light card, the more-info dialog of a graph or lock, ...), often only on the first tap after the app started. The tap action now runs from that click itself, so nothing follows it, and the click that trails a hold action is swallowed. A tap also always runs the action of what the finger went down on, even when the card re-renders during the press, and a finger that moves more than 10 px (scrolling) no longer counts as a tap.
+
 ## [1.0.1]
 
 ### Changed

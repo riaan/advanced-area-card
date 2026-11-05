@@ -18,14 +18,25 @@ Home Assistant **2026.7 or newer**.
 
 ## Installation
 
-### HACS (recommended)
+### From the Home Assistant marketplace / HACS (recommended)
 
-[![Open your Home Assistant instance and add this repository to HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=riaan&repository=advanced-area-card&category=plugin)
+Advanced Area Card is in the default HACS repository, so you can find it by searching.
 
-1. In Home Assistant open HACS → ⋮ (top right) → **Custom repositories**.
+- **Home Assistant 2026.11 or newer:** HACS is part of Home Assistant Core. Open **Settings → Marketplace**, search for *Advanced Area Card* and **Download** it.
+- **Home Assistant 2026.7 to 2026.10:** open **HACS**, search for *Advanced Area Card* and **Download** it.
+
+HACS adds the dashboard resource for you. Afterwards, hard refresh the browser (clear the app cache in the mobile companion app).
+
+[![Open your Home Assistant instance and show the repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=riaan&repository=advanced-area-card&category=plugin)
+
+#### Fallback: add it as a custom repository
+
+If the search does not show the card (for example because the default list has not refreshed yet):
+
+1. Open HACS (on 2026.11 or newer: **Settings → Marketplace**) → ⋮ (top right) → **Custom repositories**.
 2. Add `https://github.com/riaan/advanced-area-card` with category **Dashboard**, then **Add**.
-3. Search for *Advanced Area Card* in HACS → **Download**. HACS adds the dashboard resource for you.
-4. Hard refresh the browser (clear the app cache in the mobile companion app).
+3. Search for *Advanced Area Card* → **Download**.
+4. Hard refresh the browser.
 
 ### Manual
 
@@ -36,7 +47,7 @@ Home Assistant **2026.7 or newer**.
 
 ### Updating
 
-HACS shows an update when a new release is published here. Download it from HACS, then hard refresh the browser (or clear the app cache on mobile) so the new file is loaded.
+HACS (or Settings → Marketplace on 2026.11 and newer) shows an update when a new release is published here. Download it there, then hard refresh the browser (or clear the app cache on mobile) so the new file is loaded.
 
 ## Getting started
 
@@ -44,6 +55,11 @@ HACS shows an update when a new release is published here. Download it from HACS
 2. Pick one or more **areas**.
 3. Add **chips** (lights, temperature, humidity, music, lux, or a custom chip) and **activity indicators** (pick an entity and you get a sensible default rule, icon and colour).
 4. Open **Card actions** and **Advanced styling** if you want to change what a tap does or how the card looks.
+
+![Choosing the areas](docs/editor-area.png)
+![Area chips](docs/editor-chips.png)
+![Activity indicators](docs/editor-indicators.png)
+![Card actions](docs/editor-actions.png)
 
 ## Features
 
