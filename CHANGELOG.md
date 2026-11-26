@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.0]
+
 ### Added
 
 - Fahrenheit support for the temperature chip (issue #1). The chip now shows and colours the temperature in Home Assistant's unit system (Settings → System → General), converting every sensor to it. The built-in colour table exists in both units (-4 / 14 / 32 / 41 / 50 / 59 / 68 / 86 °F next to the °C one), and the one matching the unit is used while the table is not edited. Cards saved with the old built-in °C table switch to the °F table automatically; edited tables are never changed and are read in the displayed unit.
