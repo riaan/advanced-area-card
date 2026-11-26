@@ -5,6 +5,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Fahrenheit support for the temperature chip (issue #1). The chip now shows and colours the temperature in Home Assistant's unit system (Settings → System → General), converting every sensor to it. The built-in colour table exists in both units (-4 / 14 / 32 / 41 / 50 / 59 / 68 / 86 °F next to the °C one), and the one matching the unit is used while the table is not edited. Cards saved with the old built-in °C table switch to the °F table automatically; edited tables are never changed and are read in the displayed unit.
+- New chip option `temperature_unit` (`auto`, `°C` or `°F`, default `auto`) to show one chip in a different unit than Home Assistant. In the editor: "Temperature unit". The threshold section names the unit, and "Reset to defaults" restores the table for it.
+- The default rule of a new temperature indicator is "above 77" for a sensor reporting °F (still 25 for °C). Existing indicators are unchanged.
+
+### Fixed
+
+- A temperature chip whose first sensor reported °F was compared with the °C colour table, so every reading looked hot. The unit now comes from Home Assistant (or `temperature_unit`), not from the first sensor.
+
+**Behaviour change:** if you edited the temperature thresholds in °C and later switch Home Assistant to °F, those rows are read as °F values; edit them or use "Reset to defaults".
+
 ## [1.0.2]
 
 ### Changed

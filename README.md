@@ -77,7 +77,7 @@ Small pills under the header that summarise the area. Five are ready-made:
 | Chip          | Shows                                                                          | Colour                                          |
 | ------------- | ------------------------------------------------------------------------------ | ----------------------------------------------- |
 | `lights`      | number of lights that are `on`                                                 | active / inactive colour, or the average light colour (`use_light_color`) |
-| `temperature` | average of temperature sensors and `climate` entities with `current_temperature` | threshold colours and icons, unit conversion    |
+| `temperature` | average of temperature sensors and `climate` entities with `current_temperature` | threshold colours and icons, shown in Home Assistant's unit system (°C or °F) |
 | `humidity`    | average of humidity sensors and `climate` entities with `current_humidity`     | threshold colours and icons                     |
 | `music`       | number of media players that are `playing`, `buffering` or `on`                | active / inactive colour                        |
 | `lux`         | average of illuminance sensors                                                 | threshold colours and icons                     |
@@ -89,7 +89,7 @@ Small pills under the header that summarise the area. Five are ready-made:
 - set **tap** and **hold** actions (default: more-info), see [Actions](#actions);
 - **hide it when zero** (`hidden_when_zero`; lights, music, lux and custom chips);
 - override the **active / inactive colours** (`active_color`, `inactive_color`; lights, music and custom chips);
-- edit the **threshold table** (value → colour → optional icon) of temperature, humidity, lux and numeric custom chips. Sensible defaults are built in. When rows end up out of order, the editor marks them and offers a **Sort by value** button. The temperature, humidity and lux tables have a **Reset to defaults** button that restores the built-in rows.
+- edit the **threshold table** (value → colour → optional icon) of temperature, humidity, lux and numeric custom chips. Sensible defaults are built in; the temperature defaults exist for °C and °F and follow the unit shown (Home Assistant's unit system, or the chip's `temperature_unit`). Edited temperature rows are read in the shown unit. When rows end up out of order, the editor marks them and offers a **Sort by value** button. The temperature, humidity and lux tables have a **Reset to defaults** button that restores the built-in rows.
 
 #### Custom chips
 
@@ -243,7 +243,8 @@ chips:
 | `hidden_when_zero`            | lights, music, lux, `custom` | Hide the chip when its value is zero / nothing is active. |
 | `active_color`, `inactive_color` | lights, music, `custom` | Override the colours.                                  |
 | `use_light_color`             | `lights`    | Use the average colour of the lights that are on.                    |
-| `thresholds`                  | temperature, humidity, lux, numeric `custom` | List of `{ value, color, icon }`, lowest first. |
+| `thresholds`                  | temperature, humidity, lux, numeric `custom` | List of `{ value, color, icon }`, lowest first. For temperature the values are in the displayed unit. |
+| `temperature_unit`            | `temperature` | `auto` (default: follow Home Assistant's unit system), `°C` or `°F`. |
 | `name`, `mode`, `aggregation`, `attribute`, `unit`, `decimals`, `count_operator`, `count_value` | `custom` | See [Custom chips](#custom-chips). |
 | `tap_action`, `hold_action`   | all         | Actions, see [Actions](#actions).                                    |
 

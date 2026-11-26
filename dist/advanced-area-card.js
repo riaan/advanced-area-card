@@ -47,6 +47,20 @@ const DEFAULT_THRESHOLDS = {
   ],
 };
 
+// The same temperature bands in Fahrenheit (the °C table above, converted).
+const DEFAULT_TEMPERATURE_THRESHOLDS_F = [
+  { value: -4, color: "#0CA1FF", icon: "" },
+  { value: 14, color: "#70D1FF", icon: "" },
+  { value: 32, color: "#B1E6FF", icon: "" },
+  { value: 41, color: "#DAF3FF", icon: "" },
+  { value: 50, color: "#FFE599", icon: "" },
+  { value: 59, color: "#FFC000", icon: "" },
+  { value: 68, color: "#FF9900", icon: "" },
+  { value: 86, color: "#FF0000", icon: "" },
+];
+
+const TEMPERATURE_UNITS = ["°C", "°F"];
+
 const CHIP_DEFINITIONS = {
   lights: {
     label: "Lights",
@@ -309,14 +323,15 @@ function unique(values) {
 }
 
 // Fresh copy of the built-in threshold table of a chip type (empty for types
-// without one, such as custom chips).
-function defaultThresholds(type) {
-  return (DEFAULT_THRESHOLDS[type] || []).map((threshold) => ({ ...threshold }));
+// without one, such as custom chips). Temperature has one table per unit.
+function defaultThresholds(type, unit) {
+  const table = type === "temperature" && unit === "°F"
+    ? DEFAULT_TEMPERATURE_THRESHOLDS_F
+    : DEFAULT_THRESHOLDS[type];
+  return (table || []).map((threshold) => ({ ...threshold }));
 }
 
-// True when a chip's table is exactly the built-in one.
-function thresholdsAreDefault(type, thresholds) {
-  const defaults = defaultThresholds(type);
+function sameThresholds(defaults, thresholds) {
   if (!Array.isArray(thresholds) || thresholds.length !== defaults.length) return false;
   return defaults.every((entry, index) => {
     const other = thresholds[index];
@@ -324,6 +339,35 @@ function thresholdsAreDefault(type, thresholds) {
       && (other.color || "") === (entry.color || "")
       && (other.icon || "") === (entry.icon || "");
   });
+}
+
+// True when a chip's table is exactly the built-in one. Without `unit` a
+// temperature table counts as built-in in either unit; with `unit` only the
+// table of that unit counts.
+function thresholdsAreDefault(type, thresholds, unit) {
+  if (type === "temperature" && !unit) {
+    return sameThresholds(defaultThresholds(type, "°C"), thresholds)
+      || sameThresholds(defaultThresholds(type, "°F"), thresholds);
+  }
+  return sameThresholds(defaultThresholds(type, unit), thresholds);
+}
+
+// Unit a temperature chip is shown in: the chip's own `temperature_unit` when
+// set, otherwise Home Assistant's unit system, otherwise °C.
+function getTemperatureDisplayUnit(hass, chip) {
+  const own = chip?.temperature_unit;
+  if (TEMPERATURE_UNITS.includes(own)) return own;
+  return hass?.config?.unit_system?.temperature === "°F" ? "°F" : "°C";
+}
+
+// The threshold table to use for a chip. A temperature table that is still a
+// built-in one follows the display unit; edited tables are used as they are
+// (their values are read in the displayed unit).
+function effectiveThresholds(chip, unit) {
+  if (chip.type === "temperature" && thresholdsAreDefault("temperature", chip.thresholds)) {
+    return defaultThresholds("temperature", unit);
+  }
+  return chip.thresholds;
 }
 
 function createDefaultChip(type) {
@@ -338,6 +382,7 @@ function createDefaultChip(type) {
     tap_action: { action: "more-info" },
     hold_action: { action: "none" },
   };
+  if (type === "temperature") chip.temperature_unit = "auto";
   if (type === "custom") {
     Object.assign(chip, {
       name: "",
@@ -427,6 +472,9 @@ function normalizeConfig(inputConfig) {
     ...chip,
     id: chip.id || makeId(chip.type || "chip"),
     use_light_color: chip.use_light_color === true,
+    ...(chip.type === "temperature"
+      ? { temperature_unit: TEMPERATURE_UNITS.includes(chip.temperature_unit) ? chip.temperature_unit : "auto" }
+      : {}),
     ...(chip.type === "custom" ? { use_custom_entities: true } : {}),
     entity_ids: unique(chip.entity_ids || []),
     thresholds: (Array.isArray(chip.thresholds) && chip.thresholds.length
@@ -928,10 +976,10 @@ function buildChipModel(hass, registry, config, chip, cachedAreaEntityIds) {
     const readings = entityIds
       .map((entityId) => getTemperatureValue(hass, hass.states[entityId], entityId))
       .filter(Boolean);
-    const targetUnit = readings[0]?.unit || hass?.config?.unit_system?.temperature || "°C";
+    const targetUnit = getTemperatureDisplayUnit(hass, chip);
     const values = readings.map((item) => convertTemperature(item.value, item.unit, targetUnit));
     const averageValue = roundValue(average(values), 1);
-    const match = resolveThresholdEntry(averageValue, chip.thresholds);
+    const match = resolveThresholdEntry(averageValue, effectiveThresholds(chip, targetUnit));
     return {
       ...base,
       icon: match?.icon || baseIcon,
@@ -1372,7 +1420,7 @@ function _mkDisplay(icon, color, overrides) {
   };
 }
 
-function getIndicatorDefaults(entityId, stateObj) {
+function getIndicatorDefaults(entityId, stateObj, hass) {
   const domain = getDomain(entityId);
   const deviceClass = stateObj?.attributes?.device_class;
   const nameLower = String(entityId || "").toLowerCase();
@@ -1490,7 +1538,7 @@ function getIndicatorDefaults(entityId, stateObj) {
   if (domain === "sensor") {
     if (deviceClass === "temperature") {
       return {
-        when: _mkNumericWhen(entityId, { operator: "gt", value: 25 }),
+        when: _mkNumericWhen(entityId, { operator: "gt", value: getUnit(stateObj) === "°F" || (!getUnit(stateObj) && hass?.config?.unit_system?.temperature === "°F") ? 77 : 25 }),
         display: _mkDisplay("mdi:thermometer", "#ff9800"),
       };
     }
@@ -3401,6 +3449,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       entity_ids: "Entities",
       hidden_when_zero: "Hide when zero/inactive",
       use_light_color: "Use actual light colors",
+      temperature_unit: "Temperature unit",
       active_color: "Active color",
       entity_id: "Entity",
       add_entity: "Select an entity to add",
@@ -3546,6 +3595,14 @@ class AdvancedAreaCardEditor extends HTMLElement {
     if (chip.type === "lights") {
       schema.push({ name: "use_light_color", selector: { boolean: {} } });
     }
+    if (chip.type === "temperature") {
+      const homeUnit = getTemperatureDisplayUnit(this._hass, null);
+      schema.push({ name: "temperature_unit", selector: { select: { mode: "dropdown", options: [
+        { value: "auto", label: `Follow Home Assistant (${homeUnit})` },
+        { value: "°C", label: "Celsius (°C)" },
+        { value: "°F", label: "Fahrenheit (°F)" },
+      ] } } });
+    }
     return schema;
   }
 
@@ -3640,6 +3697,20 @@ class AdvancedAreaCardEditor extends HTMLElement {
     this._resetArmed = null;
   }
 
+  // A temperature table that is still a built-in one follows the displayed
+  // unit, so the rows show what the card really uses. Only the editor's own
+  // copy changes here (nothing is emitted); the config is saved with the new
+  // rows on the next edit.
+  _syncTemperatureThresholds() {
+    for (const chip of this._config?.chips || []) {
+      if (chip.type !== "temperature") continue;
+      const unit = getTemperatureDisplayUnit(this._hass, chip);
+      if (thresholdsAreDefault("temperature", chip.thresholds) && !thresholdsAreDefault("temperature", chip.thresholds, unit)) {
+        chip.thresholds = defaultThresholds("temperature", unit);
+      }
+    }
+  }
+
   // Flags rows that are out of order and shows the hint, and shows the reset
   // button while the table differs from the built-in one, without touching
   // the DOM structure (the row being edited must keep its focus).
@@ -3648,7 +3719,8 @@ class AdvancedAreaCardEditor extends HTMLElement {
     const chip = this._config.chips[chipIndex];
     const thresholds = chip?.thresholds;
     if (!section || !Array.isArray(thresholds)) return;
-    section.classList.toggle("threshold-section--modified", !thresholdsAreDefault(chip.type, thresholds));
+    const unit = chip.type === "temperature" ? getTemperatureDisplayUnit(this._hass, chip) : undefined;
+    section.classList.toggle("threshold-section--modified", !thresholdsAreDefault(chip.type, thresholds, unit));
     let unsorted = false;
     section.querySelectorAll(".threshold-row").forEach((row) => {
       const index = Number(row.dataset.thresholdIndex);
@@ -4176,7 +4248,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
     return `
       <div class="threshold-section" id="chip-${chipIndex}-threshold-section">
         <div class="threshold-header">
-          <span class="section-label">Threshold colors</span>
+          <span class="section-label">Threshold colors${chip.type === "temperature" ? ` (${htmlEscape(getTemperatureDisplayUnit(this._hass, chip))})` : ""}</span>
           <span class="threshold-hint">Rows are out of order</span>
           <ha-button class="threshold-sort" appearance="filled" size="s" data-action="sort-thresholds" data-chip-index="${chipIndex}">
             <ha-icon icon="mdi:sort-ascending" slot="start"></ha-icon>
@@ -4470,6 +4542,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
       return;
     }
     this._rendering = true;
+    this._syncTemperatureThresholds();
 
     // Preserve focus + selection across the innerHTML rebuild so typing
     // in an override / badge / tooltip input doesn't blur and scroll the
@@ -4715,9 +4788,12 @@ class AdvancedAreaCardEditor extends HTMLElement {
           const target = this._config.chips[i];
           const prevUseLightColor = target.use_light_color;
           const prevCustomKey = target.type === "custom" ? this._customChipKey(target) : "";
+          const prevUnit = target.temperature_unit;
           Object.assign(target, data);
           // Re-render when the toggle flips so the color picker appears/disappears.
           let rebuild = data.use_light_color !== undefined && data.use_light_color !== prevUseLightColor;
+          // A new unit changes the built-in threshold rows and the header.
+          if (target.type === "temperature" && target.temperature_unit !== prevUnit) rebuild = true;
           if (target.type === "custom") {
             this._coerceCustomChipValue(target);
             // Mode / condition / entity changes alter which fields apply.
@@ -4800,7 +4876,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
           );
           if (alreadyUsed) return;
           const stateObj = this._hass.states[entityId];
-          const defaults = getIndicatorDefaults(entityId, stateObj);
+          const defaults = getIndicatorDefaults(entityId, stateObj, this._hass);
           const newIndicator = normalizeIndicator({
             name: "",
             when: defaults.when,
@@ -5728,7 +5804,7 @@ class AdvancedAreaCardEditor extends HTMLElement {
         return;
       }
       this._disarmReset();
-      chip.thresholds = defaultThresholds(chip.type);
+      chip.thresholds = defaultThresholds(chip.type, getTemperatureDisplayUnit(this._hass, chip));
       this.emitConfig();
       this.render();
       return;
